@@ -1,4 +1,7 @@
+'use client';
+
 import React from 'react';
+import { usePathname } from 'next/navigation';
 import { Navbar } from '@/components/navbar/Navbar';
 import Link from 'next/link';
 
@@ -7,6 +10,19 @@ export default function PublicLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+
+  // Check if current route is a chapter reader page (e.g., /komik/slug/47)
+  const isReaderPage = pathname ? /^\/komik\/[^\/]+\/\d+$/.test(pathname) : false;
+
+  if (isReaderPage) {
+    return (
+      <div className="min-h-screen bg-[#0B0C0F] text-[#F2F3F5]">
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0F1115] text-[#F2F3F5]">
       <Navbar />
@@ -27,3 +43,4 @@ export default function PublicLayout({
     </div>
   );
 }
+

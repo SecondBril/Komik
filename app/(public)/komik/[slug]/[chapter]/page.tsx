@@ -21,7 +21,26 @@ export default function ReadingViewerPage() {
   const [allChapters, setAllChapters] = useState<Chapter[]>([]);
   const [pages, setPages] = useState<ChapterPage[]>([]);
   const [readMode, setReadMode] = useState<'scroll' | 'paged'>('scroll');
+  const [containerWidth, setContainerWidth] = useState<'normal' | 'large' | 'full'>('large');
+  const [isNavVisible, setIsNavVisible] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Auto-hide navigation on scroll down, show on scroll up
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      if (currentScrollY > 50 && currentScrollY > lastScrollY) {
+        setIsNavVisible(false);
+      } else if (currentScrollY < lastScrollY) {
+        setIsNavVisible(true);
+      }
+      setLastScrollY(currentScrollY);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [lastScrollY]);
 
   useEffect(() => {
     async function loadData() {
@@ -71,7 +90,10 @@ export default function ReadingViewerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B0C0F] text-[#F2F3F5] pt-14 pb-20 select-none">
+    <div
+      className="min-h-screen bg-[#0B0C0F] text-[#F2F3F5] pt-14 pb-20 select-none cursor-pointer"
+      onClick={() => setIsNavVisible((prev) => !prev)}
+    >
       <ChapterNav
         comicSlug={slug}
         comicTitle={comic.title}
@@ -79,6 +101,9 @@ export default function ReadingViewerPage() {
         allChapters={allChapters}
         readMode={readMode}
         onToggleReadMode={setReadMode}
+        containerWidth={containerWidth}
+        onToggleContainerWidth={setContainerWidth}
+        isVisible={isNavVisible}
       />
 
       {readMode === 'scroll' ? (
@@ -86,6 +111,7 @@ export default function ReadingViewerPage() {
           pages={pages}
           comicTitle={comic.title}
           chapterNumber={chapterNo}
+          containerWidth={containerWidth}
           onScrollProgress={(progress) => {
             if (progress > 80 && comic && currentChapter) {
               saveReadingHistory({

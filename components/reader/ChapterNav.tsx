@@ -13,6 +13,9 @@ interface ChapterNavProps {
   allChapters: Chapter[];
   readMode: 'scroll' | 'paged';
   onToggleReadMode: (mode: 'scroll' | 'paged') => void;
+  containerWidth?: 'normal' | 'large' | 'full';
+  onToggleContainerWidth?: (width: 'normal' | 'large' | 'full') => void;
+  isVisible?: boolean;
 }
 
 export const ChapterNav: React.FC<ChapterNavProps> = ({
@@ -22,28 +25,35 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
   allChapters,
   readMode,
   onToggleReadMode,
+  containerWidth = 'large',
+  onToggleContainerWidth,
+  isVisible: externalIsVisible,
 }) => {
   const router = useRouter();
-  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const [internalIsVisible, setInternalIsVisible] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isJumpModalOpen, setIsJumpModalOpen] = useState(false);
   const [lastScrollY, setLastScrollY] = useState(0);
 
   // Auto-hide header on scroll down, show on scroll up
   useEffect(() => {
+    if (externalIsVisible !== undefined) return;
+
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      if (currentScrollY > 80 && currentScrollY > lastScrollY) {
-        setIsHeaderVisible(false);
+      if (currentScrollY > 50 && currentScrollY > lastScrollY) {
+        setInternalIsVisible(false);
       } else {
-        setIsHeaderVisible(true);
+        setInternalIsVisible(true);
       }
       setLastScrollY(currentScrollY);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [lastScrollY]);
+  }, [lastScrollY, externalIsVisible]);
+
+  const isNavVisible = externalIsVisible !== undefined ? externalIsVisible : internalIsVisible;
 
   // Find previous and next chapters
   const sortedChapters = [...allChapters].sort((a, b) => a.chapter_number - b.chapter_number);
@@ -56,11 +66,12 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
     <>
       {/* Auto-Hiding Top Header */}
       <header
-        className={`fixed top-0 left-0 right-0 z-40 bg-[#171A21]/95 backdrop-blur-md border-b border-[#2A2F3A] transition-transform duration-300 ${
-          isHeaderVisible ? 'translate-y-0' : '-translate-y-full'
+        onClick={(e) => e.stopPropagation()}
+        className={`fixed top-0 left-0 right-0 z-40 bg-[#171A21]/95 backdrop-blur-md border-b border-[#2A2F3A] transition-all duration-300 ${
+          isNavVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
         }`}
       >
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between gap-3 text-[#F2F3F5]">
+        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3 text-[#F2F3F5]">
           <Link
             href={`/komik/${comicSlug}`}
             className="flex items-center gap-1.5 text-xs font-semibold text-[#9AA0AC] hover:text-white transition-colors"
@@ -82,7 +93,7 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
             </button>
           </div>
 
-          {/* Menu Options (Read Mode Toggle) */}
+          {/* Menu Options (Read Mode & Width Toggle) */}
           <div className="relative">
             <button
               type="button"
@@ -93,36 +104,85 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
             </button>
 
             {isMenuOpen && (
-              <div className="absolute right-0 top-10 w-52 bg-[#171A21] border border-[#2A2F3A] rounded-xl shadow-2xl py-2 z-50 animate-fade-in">
-                <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#9AA0AC]">
-                  Mode Baca
+              <div className="absolute right-0 top-10 w-56 bg-[#171A21] border border-[#2A2F3A] rounded-xl shadow-2xl py-2 z-50 animate-fade-in divide-y divide-[#2A2F3A]">
+                <div>
+                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#9AA0AC]">
+                    Mode Baca
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleReadMode('scroll');
+                      setIsMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${
+                      readMode === 'scroll' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
+                    }`}
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    Scroll Vertikal (Webtoon)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleReadMode('paged');
+                      setIsMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${
+                      readMode === 'paged' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
+                    }`}
+                  >
+                    <LayoutList className="w-4 h-4" />
+                    Page-by-Page (Manga)
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onToggleReadMode('scroll');
-                    setIsMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${
-                    readMode === 'scroll' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
-                  }`}
-                >
-                  <Smartphone className="w-4 h-4" />
-                  Scroll Vertikal (Webtoon)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onToggleReadMode('paged');
-                    setIsMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${
-                    readMode === 'paged' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
-                  }`}
-                >
-                  <LayoutList className="w-4 h-4" />
-                  Page-by-Page (Manga)
-                </button>
+
+                {onToggleContainerWidth && (
+                  <div className="pt-1.5">
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#9AA0AC]">
+                      Lebar Tampilan
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleContainerWidth('normal');
+                        setIsMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
+                        containerWidth === 'normal' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
+                      }`}
+                    >
+                      <span>Sedang (768px)</span>
+                      {containerWidth === 'normal' && <span className="text-[10px]">✓</span>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleContainerWidth('large');
+                        setIsMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
+                        containerWidth === 'large' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
+                      }`}
+                    >
+                      <span>Besar (1024px)</span>
+                      {containerWidth === 'large' && <span className="text-[10px]">✓</span>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleContainerWidth('full');
+                        setIsMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
+                        containerWidth === 'full' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
+                      }`}
+                    >
+                      <span>Layar Penuh (100%)</span>
+                      {containerWidth === 'full' && <span className="text-[10px]">✓</span>}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -169,8 +229,15 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
         </div>
       )}
 
-      {/* Always Visible Fixed Floating Bottom Navigation Bar */}
-      <nav className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#171A21]/95 border border-[#2A2F3A] backdrop-blur-md rounded-full shadow-2xl px-4 py-2 flex items-center gap-3 text-[#F2F3F5]">
+      {/* Auto-Hiding Floating Bottom Navigation Bar */}
+      <nav
+        onClick={(e) => e.stopPropagation()}
+        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#171A21]/95 border border-[#2A2F3A] backdrop-blur-md rounded-full shadow-2xl px-4 py-2 flex items-center gap-3 text-[#F2F3F5] transition-all duration-300 ${
+          isNavVisible
+            ? 'translate-y-0 opacity-100'
+            : 'translate-y-24 opacity-0 pointer-events-none'
+        }`}
+      >
         {prevChapter ? (
           <Link
             href={`/komik/${comicSlug}/${prevChapter.chapter_number}`}

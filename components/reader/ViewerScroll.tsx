@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import Image from 'next/image';
 import { ChapterPage } from '@/lib/types';
 
 interface ViewerScrollProps {
   pages: ChapterPage[];
   comicTitle: string;
   chapterNumber: number;
+  containerWidth?: 'normal' | 'large' | 'full';
   onScrollProgress?: (progressPercent: number) => void;
 }
 
@@ -15,6 +15,7 @@ export const ViewerScroll: React.FC<ViewerScrollProps> = ({
   pages,
   comicTitle,
   chapterNumber,
+  containerWidth = 'large',
   onScrollProgress,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -34,31 +35,34 @@ export const ViewerScroll: React.FC<ViewerScrollProps> = ({
     return () => window.removeEventListener('scroll', handleScroll);
   }, [onScrollProgress]);
 
+  const widthClass = {
+    normal: 'max-w-3xl',
+    large: 'max-w-5xl',
+    full: 'max-w-full px-0',
+  }[containerWidth];
+
   return (
     <div
       ref={containerRef}
-      className="w-full max-w-3xl mx-auto flex flex-col items-center bg-[#0B0C0F] min-h-screen py-4"
+      className={`w-full ${widthClass} mx-auto flex flex-col items-center bg-[#0B0C0F] min-h-screen py-2 transition-all duration-300`}
     >
       {pages.map((page, index) => (
         <div
           key={page.id || page.page_number}
-          className="relative w-full aspect-[2/3] max-w-2xl bg-[#0B0C0F]"
+          className="w-full relative flex justify-center bg-[#0B0C0F]"
         >
-          <Image
+          <img
             src={page.image_url}
             alt={`${comicTitle} - Chapter ${chapterNumber} - Halaman ${page.page_number}`}
-            fill
-            unoptimized
-            sizes="(max-width: 768px) 100vw, 800px"
             loading={index < 3 ? 'eager' : 'lazy'}
-            priority={index < 2}
             onError={(e: any) => {
               e.currentTarget.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1000&auto=format&fit=crop&q=80';
             }}
-            className="object-contain"
+            className="w-full h-auto block object-contain select-none transition-opacity duration-200"
           />
         </div>
       ))}
     </div>
   );
 };
+

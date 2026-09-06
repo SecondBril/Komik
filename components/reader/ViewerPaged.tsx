@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import Image from 'next/image';
 import { ChapterPage } from '@/lib/types';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -39,7 +38,7 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[80vh] py-4 bg-[#0B0C0F]">
+    <div className="w-full max-w-5xl mx-auto flex flex-col items-center justify-center min-h-[85vh] py-4 bg-[#0B0C0F]">
       {/* Page indicator pill */}
       <div className="mb-3 px-3 py-1 rounded-full bg-[#171A21] border border-[#2A2F3A] text-xs font-semibold text-[#F2F3F5]">
         Halaman {currentPageIndex + 1} / {pages.length}
@@ -47,20 +46,16 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
 
       {/* Main Single Page Image */}
       <div
-        className="relative w-full max-w-2xl aspect-[2/3] bg-[#0F1115] rounded-lg overflow-hidden cursor-pointer shadow-2xl"
+        className="relative w-full flex justify-center items-center cursor-pointer min-h-[500px]"
         onClick={handleNextPage}
       >
-        <Image
+        <img
           src={currentPage.image_url}
           alt={`${comicTitle} - Chapter ${chapterNumber} - Halaman ${currentPage.page_number}`}
-          fill
-          unoptimized
-          sizes="(max-width: 768px) 100vw, 800px"
-          priority
           onError={(e: any) => {
             e.currentTarget.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1000&auto=format&fit=crop&q=80';
           }}
-          className="object-contain"
+          className="max-h-[85vh] w-auto max-w-full h-auto object-contain rounded-md shadow-2xl transition-all duration-200"
         />
       </div>
 
@@ -93,3 +88,4 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
     </div>
   );
 };
+
