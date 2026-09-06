@@ -1,0 +1,48 @@
+name: Comic Ingest Pipeline
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # Runs every 30 minutes
+  workflow_dispatch: {}     # Manual trigger support from GitHub Actions UI
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: workers/package-lock.json
+
+      - name: Install Google Chrome Headless
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install Worker Dependencies
+        run: npm ci
+        working-directory: workers
+
+      - name: Run Scraper Worker (Puppeteer SPA Engine)
+        run: npm run scrape
+        working-directory: workers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
+          IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
+          R2_PUBLIC_CDN_URL: ${{ secrets.R2_PUBLIC_CDN_URL }}
+
+      - name: Run Image Processing Worker (WebP & ImageKit CDN Upload)
+        run: npm run process-images
+        working-directory: workers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
+          IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
+          R2_PUBLIC_CDN_URL: ${{ secrets.R2_PUBLIC_CDN_URL }}
