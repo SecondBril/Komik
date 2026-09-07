@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       .select(`
         id, title, slug, type, status, cover_url, rating, author,
         synopsis, updated_at, created_at,
-        genres:comic_genres(genres(id, name)),
+        genres:comic_genres(genres(id, name, slug)),
         chapters:chapters(id, chapter_number, title, released_at)
       `, { count: 'exact' });
 
@@ -57,17 +57,24 @@ export async function GET(req: NextRequest) {
         ...item,
         genres: item.genres?.map((g: any) => g.genres).filter(Boolean) || [],
         latest_chapter: sortedChapters?.[0] || null,
-        chapters: undefined, // remove raw chapters array
+        chapters: undefined,
       };
     });
 
-    // Genre filter (done post-query for simplicity; move to DB if needed)
+    // Multi-genre filter (checks that comic has all requested genres, or at least one if multiple)
     let filteredComics = comics;
     if (genres) {
-      const genreIds = genres.split(',').map(Number).filter(Boolean);
-      if (genreIds.length > 0) {
+      const tokens = genres.split(',').map((g) => g.trim().toLowerCase()).filter(Boolean);
+      if (tokens.length > 0) {
         filteredComics = comics.filter((c: any) =>
-          genreIds.every((gId) => c.genres?.some((g: any) => g.id === gId))
+          tokens.some((tok) =>
+            c.genres?.some(
+              (g: any) =>
+                String(g.id) === tok ||
+                g.slug?.toLowerCase() === tok ||
+                g.name?.toLowerCase() === tok
+            )
+          )
         );
       }
     }
@@ -75,7 +82,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       data: filteredComics,
-      total: count ?? filteredComics.length,
+      total: genres ? filteredComics.length : (count ?? filteredComics.length),
       page,
       limit,
     });

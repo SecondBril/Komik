@@ -1,12 +1,33 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Image from 'next/image';
+import Link from 'next/link';
 import { ComicCard } from '@/components/comic/ComicCard';
-import { FilterPanel } from '@/components/filters/FilterPanel';
-import { Search, Compass, X, RotateCcw, Loader2, ChevronDown } from 'lucide-react';
-import { Genre, FilterState, Comic } from '@/lib/types';
-import { MOCK_GENRES } from '@/lib/mock-data';
+import { DecorativeBlobs } from '@/components/ui/DecorativeBlobs';
+import { Search, ArrowLeft, Settings, ArrowRight, X, Sparkles, Filter, SlidersHorizontal, Check } from 'lucide-react';
+import { Genre, Comic } from '@/lib/types';
+import { MOCK_COMICS, MOCK_GENRES } from '@/lib/mock-data';
+
+const TYPE_OPTIONS = [
+  { label: 'Semua Tipe', value: 'all' },
+  { label: 'Manhwa (Korea)', value: 'manhwa' },
+  { label: 'Manga (Jepang)', value: 'manga' },
+  { label: 'Manhua (China)', value: 'manhua' },
+];
+
+const STATUS_OPTIONS = [
+  { label: 'Semua Status', value: 'all' },
+  { label: 'Ongoing (Berjalan)', value: 'ongoing' },
+  { label: 'Completed (Tamat)', value: 'completed' },
+];
+
+const SORT_OPTIONS = [
+  { label: 'Update Terbaru', value: 'latest' },
+  { label: 'Rating Tertinggi', value: 'popular' },
+  { label: 'Judul (A-Z)', value: 'title' },
+];
 
 function BrowseContent() {
   const searchParams = useSearchParams();
@@ -14,264 +35,503 @@ function BrowseContent() {
 
   const queryParam = searchParams.get('q') || '';
   const typeParam = searchParams.get('type') || 'all';
-  const statusParam = searchParams.get('status') || 'all';
+  const genreParam = searchParams.get('genre') || '';
 
-  const [genres, setGenres] = useState<Genre[]>(MOCK_GENRES);
-  const [filters, setFilters] = useState<FilterState>({
-    type: typeParam as any,
-    status: statusParam as any,
-    genres: [],
-    query: queryParam,
-  });
+  const [activeType, setActiveType] = useState(typeParam || 'all');
+  const [activeStatus, setActiveStatus] = useState('all');
+  const [activeSort, setActiveSort] = useState('latest');
+  const [selectedGenres, setSelectedGenres] = useState<string[]>(
+    genreParam ? [genreParam] : []
+  );
+  const [searchQuery, setSearchQuery] = useState(queryParam);
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
+  const [genres, setGenres] = useState<{ id: number; name: string; slug: string; count?: number }[]>([]);
   const [comics, setComics] = useState<Comic[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [error, setError] = useState<string | null>(null);
 
-  const LIMIT = 30;
-  const hasMore = comics.length < total;
-
-  // Fetch genres from Supabase
+  // Fetch real genres with actual counts
   useEffect(() => {
-    fetch('/api/genres')
+    fetch('/api/genres', { cache: 'no-store' })
       .then((r) => r.json())
       .then((d) => {
-        if (d.success && d.data?.length > 0) setGenres(d.data);
+        if (d.success && Array.isArray(d.data) && d.data.length > 0) {
+          setGenres(d.data);
+        } else {
+          // Fallback with real counts from MOCK_COMICS
+          const counts: Record<number, number> = {};
+          MOCK_COMICS.forEach((c) => {
+            c.genres?.forEach((g) => {
+              counts[g.id] = (counts[g.id] || 0) + 1;
+            });
+          });
+          setGenres(
+            MOCK_GENRES.map((g) => ({
+              ...g,
+              count: counts[g.id] || 0,
+            }))
+          );
+        }
       })
-      .catch(() => {}); // keep mock fallback
+      .catch(() => { });
   }, []);
 
-  // Sync query param → filters
-  useEffect(() => {
-    setFilters((prev) => ({ ...prev, query: queryParam }));
-  }, [queryParam]);
-
-  // Fetch comics when filters change (reset to page 1)
-  const fetchComics = useCallback(async (currentFilters: FilterState, pageNum: number, append: boolean) => {
-    if (pageNum === 1) setLoading(true);
-    else setLoadingMore(true);
-    setError(null);
-
+  // Fetch comics with multi-category & detailed filters
+  const fetchComics = useCallback(async () => {
+    setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (currentFilters.type && currentFilters.type !== 'all') params.set('type', currentFilters.type);
-      if (currentFilters.status && currentFilters.status !== 'all') params.set('status', currentFilters.status);
-      if (currentFilters.query) params.set('q', currentFilters.query);
-      if (currentFilters.genres?.length) params.set('genres', currentFilters.genres.join(','));
-      if (currentFilters.sort) params.set('sort', currentFilters.sort);
-      params.set('page', String(pageNum));
-      params.set('limit', String(LIMIT));
+      if (activeType !== 'all') params.set('type', activeType);
+      if (activeStatus !== 'all') params.set('status', activeStatus);
+      if (activeSort !== 'latest') params.set('sort', activeSort);
+      if (searchQuery.trim()) params.set('q', searchQuery.trim());
+      if (selectedGenres.length > 0) params.set('genres', selectedGenres.join(','));
+      params.set('limit', '36');
 
       const res = await fetch(`/api/browse?${params.toString()}`);
       const data = await res.json();
 
-      if (data.success) {
-        setTotal(data.total ?? 0);
-        if (append) {
-          setComics((prev) => [...prev, ...data.data]);
-        } else {
-          setComics(data.data);
-        }
+      if (data.success && data.data) {
+        setComics(data.data);
+        setTotal(data.total ?? data.data.length);
       } else {
-        setError(data.error || 'Gagal memuat data');
+        // Fallback filter on mock
+        let filtered = [...MOCK_COMICS];
+        if (activeType !== 'all') filtered = filtered.filter((c) => c.type === activeType);
+        if (activeStatus !== 'all') filtered = filtered.filter((c) => c.status === activeStatus);
+        if (selectedGenres.length > 0) {
+          filtered = filtered.filter((c) =>
+            selectedGenres.some((slug) => c.genres?.some((g) => g.slug === slug))
+          );
+        }
+        if (searchQuery.trim()) {
+          const q = searchQuery.trim().toLowerCase();
+          filtered = filtered.filter(
+            (c) =>
+              c.title.toLowerCase().includes(q) ||
+              c.alt_titles?.some((a) => a.toLowerCase().includes(q))
+          );
+        }
+        if (activeSort === 'popular') {
+          filtered.sort((a, b) => b.rating - a.rating);
+        } else if (activeSort === 'title') {
+          filtered.sort((a, b) => a.title.localeCompare(b.title));
+        } else {
+          filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+        }
+        setComics(filtered);
+        setTotal(filtered.length);
       }
     } catch {
-      setError('Gagal terhubung ke server');
+      setComics(MOCK_COMICS);
+      setTotal(MOCK_COMICS.length);
     } finally {
       setLoading(false);
-      setLoadingMore(false);
     }
-  }, []);
+  }, [activeType, activeStatus, activeSort, selectedGenres, searchQuery]);
 
-  // Refetch on filter change (reset pagination)
   useEffect(() => {
-    setPage(1);
-    fetchComics(filters, 1, false);
-  }, [filters, fetchComics]);
+    fetchComics();
+  }, [fetchComics]);
 
-  const handleLoadMore = () => {
-    const nextPage = page + 1;
-    setPage(nextPage);
-    fetchComics(filters, nextPage, true);
+  // Toggle multi-genre selection
+  const handleToggleGenre = (slug: string) => {
+    setSelectedGenres((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
+    );
   };
 
   const handleResetFilters = () => {
-    setFilters({ type: 'all', status: 'all', genres: [], query: '' });
-    router.push('/browse');
+    setActiveType('all');
+    setActiveStatus('all');
+    setActiveSort('latest');
+    setSelectedGenres([]);
+    setSearchQuery('');
+    setIsFilterDrawerOpen(false);
   };
 
-  const removeGenreFilter = (genreId: number) => {
-    setFilters((prev) => ({ ...prev, genres: prev.genres.filter((id) => id !== genreId) }));
-  };
-
-  const activeFilterCount =
-    (filters.type !== 'all' ? 1 : 0) +
-    (filters.status !== 'all' ? 1 : 0) +
-    (filters.genres?.length || 0) +
-    (filters.query ? 1 : 0);
+  const hasActiveFilters =
+    activeType !== 'all' ||
+    activeStatus !== 'all' ||
+    activeSort !== 'latest' ||
+    selectedGenres.length > 0 ||
+    searchQuery.trim() !== '';
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-[#7C5CFC]/10 text-[#7C5CFC]">
-              <Compass className="w-6 h-6" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#F2F3F5]">
-              Katalog Komik
+    <div className="relative min-h-screen bg-[#F7F2E6] pb-24">
+      <DecorativeBlobs variant="browse" />
+
+      {/* Responsive Container for Mobile, Tablet, and Desktop */}
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 flex flex-col gap-6 z-10">
+
+        {/* 1. Hero Banner */}
+        <div className="relative w-full aspect-[16/9] sm:aspect-[21/9] lg:aspect-[24/8] min-h-[190px] rounded-[28px] sm:rounded-[36px] overflow-hidden border-[3px] border-[#1A1A1A] shadow-[4px_4px_0px_#1A1A1A] sm:shadow-[6px_6px_0px_#1A1A1A] bg-[#1A1A1A]">
+          <Image
+            src="https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1400&auto=format&fit=crop&q=80"
+            alt="Katalog Komik Banner"
+            fill
+            priority
+            className="object-cover object-top"
+          />
+
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
+
+          {/* Top-Left Floating Pill: "<- Home" */}
+          <Link
+            href="/"
+            className="absolute top-4 left-4 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white text-[#1A1A1A] border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#FAF7F0] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+          >
+            <ArrowLeft className="w-4 h-4 stroke-[2.5]" />
+            <span>Home</span>
+          </Link>
+
+          {/* Top-Right Floating Circle: Filter Toggle */}
+          <button
+            onClick={() => setIsFilterDrawerOpen(true)}
+            className={`absolute top-4 right-4 px-3.5 py-1.5 rounded-full border-2 border-[#1A1A1A] flex items-center gap-1.5 text-xs font-black shadow-[2px_2px_0px_#1A1A1A] transition-all active:scale-95 ${hasActiveFilters ? 'bg-[#F6C945] text-[#1A1A1A]' : 'bg-white text-[#1A1A1A] hover:bg-[#FAF7F0]'
+              }`}
+            title="Filter Lengkap"
+          >
+            <SlidersHorizontal className="w-4 h-4 stroke-[2.5]" />
+            <span className="hidden sm:inline">Filter Detail</span>
+          </button>
+
+          {/* Hero Title Overlay */}
+          <div className="absolute bottom-4 left-5 right-5 sm:bottom-6 sm:left-8">
+            <span className="px-3 py-1 rounded-full bg-[#F6C945] border border-[#1A1A1A] text-[10px] font-black text-[#1A1A1A] uppercase tracking-wider shadow-sm">
+              Koleksi Manga, Manhwa & Manhua
+            </span>
+            <h1 className="text-white text-xl sm:text-3xl font-black tracking-tight drop-shadow-md mt-2">
+              Katalog & Kategori Komik
             </h1>
+            <p className="text-white/80 text-xs sm:text-sm font-medium mt-1 max-w-xl hidden sm:block">
+              Filter komik berdasarkan multi-kategori, tipe komik, dan status rilis terlengkap!
+            </p>
           </div>
-          {!loading && (
-            <span className="text-xs text-[#9AA0AC] bg-[#171A21] border border-[#2A2F3A] px-2.5 py-1 rounded-full">
-              {total.toLocaleString()} judul
-            </span>
-          )}
         </div>
-        <p className="text-xs text-[#9AA0AC]">
-          Temukan ribuan Manga, Manhwa, dan Manhua Bahasa Indonesia terlengkap.
-        </p>
-      </div>
 
-      {/* Active Filter Chips */}
-      {activeFilterCount > 0 && (
-        <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-[#171A21] border border-[#2A2F3A]">
-          <span className="text-xs font-bold text-[#9AA0AC]">Filter Aktif:</span>
+        {/* 2. Quick Filter Bar (Type, Sort, and Search Input) */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white p-3.5 rounded-3xl border-2 border-[#1A1A1A] shadow-[3px_3px_0px_#1A1A1A]">
 
-          {filters.query && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-[#7C5CFC] text-white">
-              <Search className="w-3 h-3" />
-              &quot;{filters.query}&quot;
-              <button type="button" onClick={() => setFilters((p) => ({ ...p, query: '' }))} className="hover:text-red-300">
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          )}
+          {/* Left: Type pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+            {TYPE_OPTIONS.map((opt) => {
+              const isActive = activeType === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => setActiveType(opt.value)}
+                  className={`shrink-0 px-3.5 py-1.5 rounded-full border-2 border-[#1A1A1A] text-xs font-black tracking-tight transition-all active:translate-x-[1px] active:translate-y-[1px] ${isActive
+                      ? 'bg-[#F6C945] text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A]'
+                      : 'bg-[#FAF7F0] text-[#1A1A1A] hover:bg-white'
+                    }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
 
-          {filters.type !== 'all' && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-[#1F232C] text-[#F2F3F5] border border-[#2A2F3A] uppercase">
-              Tipe: {filters.type}
-              <button type="button" onClick={() => setFilters((p) => ({ ...p, type: 'all' }))} className="hover:text-red-400">
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          )}
+          {/* Right: Sort selector & Search bar */}
+          <div className="flex items-center gap-2">
+            <select
+              value={activeSort}
+              onChange={(e) => setActiveSort(e.target.value)}
+              className="py-2 px-3 rounded-2xl bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] focus:outline-none shadow-sm cursor-pointer"
+            >
+              {SORT_OPTIONS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
 
-          {filters.status !== 'all' && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-[#1F232C] text-[#F2F3F5] border border-[#2A2F3A] capitalize">
-              Status: {filters.status}
-              <button type="button" onClick={() => setFilters((p) => ({ ...p, status: 'all' }))} className="hover:text-red-400">
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          )}
+            <button
+              onClick={() => setIsFilterDrawerOpen(true)}
+              className="px-3 py-2 rounded-2xl bg-[#2E7D6E] text-white border-2 border-[#1A1A1A] text-xs font-black flex items-center gap-1.5 shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#236357]"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filter ({selectedGenres.length + (activeStatus !== 'all' ? 1 : 0)})</span>
+            </button>
+          </div>
+        </div>
 
-          {filters.genres.map((gId) => {
-            const genreObj = genres.find((g) => g.id === gId);
-            return (
-              <span key={gId} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-[#7C5CFC]/20 text-[#7C5CFC] border border-[#7C5CFC]/40">
-                {genreObj?.name}
-                <button type="button" onClick={() => removeGenreFilter(gId)} className="hover:text-red-400">
+        {/* Active Filter Chips */}
+        {hasActiveFilters && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <span className="text-xs font-bold text-[#7A756D]">Filter Aktif:</span>
+            {selectedGenres.map((slug) => {
+              const genreObj = genres.find((g) => g.slug === slug);
+              return (
+                <span
+                  key={slug}
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-[#F6C945] border border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-sm"
+                >
+                  {genreObj?.name || slug}
+                  <button
+                    onClick={() => handleToggleGenre(slug)}
+                    className="hover:bg-black/10 rounded-full p-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              );
+            })}
+            {activeType !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-[#1A1A1A] text-xs font-black text-[#1A1A1A]">
+                Tipe: {activeType.toUpperCase()}
+                <button onClick={() => setActiveType('all')} className="hover:bg-black/10 rounded-full p-0.5">
                   <X className="w-3 h-3" />
                 </button>
               </span>
-            );
-          })}
+            )}
+            {activeStatus !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-[#1A1A1A] text-xs font-black text-[#1A1A1A]">
+                Status: {activeStatus.toUpperCase()}
+                <button onClick={() => setActiveStatus('all')} className="hover:bg-black/10 rounded-full p-0.5">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            <button
+              onClick={handleResetFilters}
+              className="text-xs font-bold text-[#E96379] underline hover:text-[#C53030] ml-1"
+            >
+              Reset Semua
+            </button>
+          </div>
+        )}
 
-          <button type="button" onClick={handleResetFilters} className="text-xs font-semibold text-red-400 hover:underline ml-auto flex items-center gap-1">
-            <RotateCcw className="w-3 h-3" /> Reset Semua
-          </button>
-        </div>
-      )}
+        {/* 3. Section "Categories" - Responsive Grid with Real Comic Counts */}
+        <section className="flex flex-col gap-3.5">
+          <div className="flex items-center justify-between border-b-2 border-[#1A1A1A] pb-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl sm:text-2xl font-black text-[#1A1A1A] tracking-tight">
+                Categories
+              </h2>
+              <span className="text-[10px] sm:text-xs font-extrabold text-[#7A756D]">
+                (Klik untuk memilih multi-kategori)
+              </span>
+            </div>
+            {selectedGenres.length > 0 && (
+              <button
+                onClick={() => setSelectedGenres([])}
+                className="text-xs font-black text-[#2E7D6E] underline shrink-0"
+              >
+                Hapus Pilihan ({selectedGenres.length})
+              </button>
+            )}
+          </div>
 
-      {/* Main Grid */}
-      <div className="flex flex-col lg:flex-row gap-6">
-        <FilterPanel
-          genres={genres}
-          initialFilters={filters}
-          onFilterChange={setFilters}
-          onReset={handleResetFilters}
-        />
+          {/* Terkunci 3 Kolom di Semua Ukuran Layar */}
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
+            {genres.map((cat) => {
+              const isSelected = selectedGenres.includes(cat.slug);
+              return (
+                <button
+                  key={cat.id || cat.slug}
+                  onClick={() => handleToggleGenre(cat.slug)}
+                  className={`py-1.5 px-2 sm:py-3 sm:px-4 rounded-xl sm:rounded-2xl border-[1.5px] sm:border-2 border-[#1A1A1A] flex items-center justify-between text-left transition-all active:translate-x-[1px] active:translate-y-[1px] min-w-0 ${isSelected
+                      ? 'bg-[#F6C945] text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] ring-2 ring-[#1A1A1A]'
+                      : 'bg-[#2E7D6E] hover:bg-[#286F62] text-white shadow-[2px_2px_0px_#1A1A1A] sm:shadow-[3px_3px_0px_#1A1A1A]'
+                    }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-baseline gap-0 sm:gap-1.5 truncate pr-1 min-w-0">
+                    <span
+                      className={`text-[11px] sm:text-base font-black truncate leading-tight ${isSelected ? 'text-[#1A1A1A]' : 'text-white'
+                        }`}
+                    >
+                      {cat.name}
+                    </span>
+                    <span
+                      className={`text-[9px] sm:text-[11px] font-bold shrink-0 leading-none ${isSelected ? 'text-[#1A1A1A]/75' : 'text-white/80'
+                        }`}
+                    >
+                      ({cat.count ?? 0})
+                    </span>
+                  </div>
 
-        <div className="flex-1 flex flex-col gap-5">
+                  {/* Circle indicator */}
+                  <div
+                    className="w-4 h-4 sm:w-7 sm:h-7 rounded-full border border-[#1A1A1A] sm:border-2 flex items-center justify-center shrink-0 shadow-sm bg-white text-[#1A1A1A]"
+                  >
+                    {isSelected ? (
+                      <Check className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 stroke-[3] text-[#2E7D6E]" />
+                    ) : (
+                      <ArrowRight className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 text-[#1A1A1A] stroke-[3]" />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 4. Comics Results List - Responsive Grid */}
+        <section className="flex flex-col gap-4 mt-2">
+          <div className="flex items-center justify-between border-b-2 border-[#1A1A1A] pb-2">
+            <h3 className="text-lg sm:text-xl font-black text-[#1A1A1A] tracking-tight">
+              {selectedGenres.length > 0
+                ? `Genre: ${selectedGenres.map((s) => genres.find((g) => g.slug === s)?.name || s).join(', ')}`
+                : 'Semua Komik'}
+            </h3>
+            <span className="text-xs font-black text-[#1A1A1A] bg-[#F6C945] px-3.5 py-1 rounded-full border-2 border-[#1A1A1A] shadow-sm">
+              {total} Judul Ditemukan
+            </span>
+          </div>
+
           {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3.5">
-              {Array.from({ length: 15 }).map((_, i) => (
-                <div key={i} className="aspect-[2/3] rounded-xl bg-[#171A21] animate-pulse border border-[#2A2F3A]" />
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="aspect-[2/3] rounded-2xl bg-white/60 border-2 border-[#1A1A1A] animate-pulse" />
               ))}
             </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center p-12 bg-[#171A21] border border-red-500/20 rounded-2xl text-center gap-3">
-              <Compass className="w-10 h-10 text-red-400 stroke-[1.5]" />
-              <p className="text-sm font-bold text-white">Gagal memuat katalog</p>
-              <p className="text-xs text-[#9AA0AC]">{error}</p>
-              <button onClick={() => fetchComics(filters, 1, false)} className="px-4 py-2 rounded-xl bg-[#1F232C] border border-[#2A2F3A] text-xs text-[#9AA0AC] hover:text-white transition-colors">
-                Coba Lagi
-              </button>
-            </div>
           ) : comics.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-12 bg-[#171A21] border border-[#2A2F3A] rounded-2xl text-center gap-4">
-              <Compass className="w-12 h-12 text-[#5B616D] stroke-[1.5]" />
-              <div>
-                <h3 className="text-base font-bold text-[#F2F3F5] mb-1">Komik Tidak Ditemukan</h3>
-                <p className="text-xs text-[#9AA0AC] max-w-sm">
-                  Tidak ada komik yang cocok dengan kombinasi filter atau kata kunci pencarian Anda.
-                </p>
-              </div>
-              <button type="button" onClick={handleResetFilters} className="px-4 py-2 rounded-xl bg-[#7C5CFC] hover:bg-[#6A47F0] text-white font-semibold text-xs transition-colors">
-                Reset Filter &amp; Pencarian
+            <div className="py-16 text-center bg-white rounded-3xl border-2 border-[#1A1A1A] p-6 shadow-[4px_4px_0px_#1A1A1A]">
+              <Sparkles className="w-12 h-12 text-[#F6C945] mx-auto mb-2" />
+              <p className="font-extrabold text-base text-[#1A1A1A]">Tidak ada komik yang cocok</p>
+              <p className="text-xs text-[#7A756D] mt-1">Coba kurangi kombinasi filter atau pilih kategori genre lain.</p>
+              <button
+                onClick={handleResetFilters}
+                className="mt-4 px-5 py-2 rounded-full bg-[#F6C945] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-sm"
+              >
+                Reset Semua Filter
               </button>
             </div>
           ) : (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3.5 sm:gap-4">
-                {comics.map((comic) => (
-                  <ComicCard key={comic.id} comic={comic} />
-                ))}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
+              {comics.map((comic) => (
+                <ComicCard key={comic.id} comic={comic} />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* Detailed Multi-Filter Drawer / Modal */}
+      {isFilterDrawerOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#F7F2E6] w-full max-w-lg max-h-[85vh] rounded-[36px] border-[3px] border-[#1A1A1A] p-6 shadow-[8px_8px_0px_#1A1A1A] flex flex-col gap-4 overflow-hidden">
+
+            {/* Header */}
+            <div className="flex items-center justify-between pb-2 border-b-2 border-[#1A1A1A]">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5 text-[#1A1A1A]" />
+                <h4 className="text-lg font-black text-[#1A1A1A]">Filter Komik Lengkap</h4>
+              </div>
+              <button
+                onClick={() => setIsFilterDrawerOpen(false)}
+                className="w-8 h-8 rounded-full bg-white border-2 border-[#1A1A1A] flex items-center justify-center text-[#1A1A1A]"
+              >
+                <X className="w-4 h-4 stroke-[2.5]" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4">
+              {/* Tipe Komik */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-black text-[#1A1A1A] uppercase tracking-wider">
+                  Tipe Komik
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  {TYPE_OPTIONS.map((t) => (
+                    <button
+                      key={t.value}
+                      onClick={() => setActiveType(t.value)}
+                      className={`py-2 px-3 rounded-xl border-2 border-[#1A1A1A] text-xs font-bold text-left transition-all ${activeType === t.value
+                          ? 'bg-[#F6C945] text-[#1A1A1A] shadow-sm'
+                          : 'bg-white text-[#1A1A1A] hover:bg-[#FAF7F0]'
+                        }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Load More Button */}
-              {hasMore && (
-                <div className="flex justify-center pt-2">
-                  <button
-                    type="button"
-                    onClick={handleLoadMore}
-                    disabled={loadingMore}
-                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#171A21] hover:bg-[#1F232C] border border-[#2A2F3A] text-sm font-semibold text-[#9AA0AC] hover:text-white transition-colors disabled:opacity-50"
-                  >
-                    {loadingMore ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4" />
-                    )}
-                    {loadingMore ? 'Memuat...' : `Muat Lebih Banyak (${total - comics.length} tersisa)`}
-                  </button>
+              {/* Status Rilis */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-black text-[#1A1A1A] uppercase tracking-wider">
+                  Status Rilis
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {STATUS_OPTIONS.map((st) => (
+                    <button
+                      key={st.value}
+                      onClick={() => setActiveStatus(st.value)}
+                      className={`py-2 px-2 rounded-xl border-2 border-[#1A1A1A] text-xs font-bold text-center transition-all ${activeStatus === st.value
+                          ? 'bg-[#F6C945] text-[#1A1A1A] shadow-sm'
+                          : 'bg-white text-[#1A1A1A] hover:bg-[#FAF7F0]'
+                        }`}
+                    >
+                      {st.label.split(' ')[0]}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
 
-              <p className="text-center text-[11px] text-[#5B616D]">
-                Menampilkan {comics.length} dari {total.toLocaleString()} komik
-              </p>
-            </>
-          )}
+              {/* Multi-Genre Selection */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-[#1A1A1A] uppercase tracking-wider">
+                    Pilih Multi-Genre ({selectedGenres.length} terpilih)
+                  </span>
+                  {selectedGenres.length > 0 && (
+                    <button
+                      onClick={() => setSelectedGenres([])}
+                      className="text-[11px] font-bold text-[#E96379] underline"
+                    >
+                      Reset Genre
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {genres.map((g) => {
+                    const isSel = selectedGenres.includes(g.slug);
+                    return (
+                      <button
+                        key={g.slug}
+                        onClick={() => handleToggleGenre(g.slug)}
+                        className={`py-2 px-2.5 rounded-xl border-2 border-[#1A1A1A] text-xs font-bold flex items-center justify-between transition-all ${isSel
+                            ? 'bg-[#2E7D6E] text-white shadow-sm'
+                            : 'bg-white text-[#1A1A1A] hover:bg-[#FAF7F0]'
+                          }`}
+                      >
+                        <span className="truncate">{g.name}</span>
+                        <span className="text-[10px] opacity-80">({g.count ?? 0})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 pt-2 border-t-2 border-[#1A1A1A]">
+              <button
+                onClick={handleResetFilters}
+                className="flex-1 py-3 rounded-2xl bg-white border-2 border-[#1A1A1A] font-black text-xs text-[#1A1A1A] shadow-sm hover:bg-[#FAF7F0]"
+              >
+                Reset Semua
+              </button>
+              <button
+                onClick={() => setIsFilterDrawerOpen(false)}
+                className="flex-1 py-3 rounded-2xl bg-[#F6C945] border-2 border-[#1A1A1A] font-black text-xs text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#EDB72B]"
+              >
+                Terapkan ({total} Komik)
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 export default function BrowsePage() {
   return (
-    <Suspense fallback={
-      <div className="flex items-center justify-center py-20 text-[#9AA0AC] gap-2">
-        <Loader2 className="w-5 h-5 animate-spin text-[#7C5CFC]" />
-        <span className="text-sm">Memuat katalog...</span>
-      </div>
-    }>
+    <Suspense fallback={<div className="min-h-screen bg-[#F7F2E6] flex items-center justify-center font-bold">Memuat katalog...</div>}>
       <BrowseContent />
     </Suspense>
   );

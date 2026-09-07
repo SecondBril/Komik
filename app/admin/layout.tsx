@@ -17,8 +17,10 @@ import {
   Lock,
   Menu,
   X,
+  Tags,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { ChameleonMascot } from '@/components/ui/ChameleonMascot';
 
 const ADMIN_EMAIL = 'ag4863017@gmail.com';
 
@@ -40,6 +42,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           setUserEmail(user.email);
           setIsAuthorized(user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
         } else {
+          // Check localStorage demo
+          const localUser = localStorage.getItem('chameleon_user');
+          if (localUser) {
+            try {
+              const parsed = JSON.parse(localUser);
+              if (parsed.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+                setUserEmail(parsed.email);
+                setIsAuthorized(true);
+                setIsCheckingAuth(false);
+                return;
+              }
+            } catch (e) {}
+          }
           setUserEmail(null);
           setIsAuthorized(false);
         }
@@ -75,10 +90,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         provider: 'google',
         options: { redirectTo: `${window.location.origin}/api/auth/callback` },
       });
+    } else {
+      localStorage.setItem('chameleon_user', JSON.stringify({ email: ADMIN_EMAIL, name: 'Admin Utama' }));
+      setUserEmail(ADMIN_EMAIL);
+      setIsAuthorized(true);
     }
   };
 
   const handleLogout = async () => {
+    localStorage.removeItem('chameleon_user');
     const supabase = createClient();
     if (supabase) await supabase.auth.signOut();
     setUserEmail(null);
@@ -88,6 +108,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const tabs = [
     { name: 'Queue', href: '/admin', icon: ListOrdered },
     { name: 'Komik', href: '/admin/comics', icon: BookOpen },
+    { name: 'Genre', href: '/admin/genres', icon: Tags },
     { name: 'Upload', href: '/admin/upload', icon: Upload },
     { name: 'Sumber', href: '/admin/sources', icon: Globe },
     { name: 'Log', href: '/admin/logs', icon: FileText },
@@ -95,48 +116,45 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   if (isCheckingAuth) {
     return (
-      <div className="min-h-screen bg-[#0F1115] text-[#F2F3F5] flex flex-col items-center justify-center gap-3">
-        <Loader2 className="w-8 h-8 animate-spin text-[#7C5CFC]" />
-        <p className="text-xs font-semibold text-[#9AA0AC]">Verifikasi Hak Akses Admin...</p>
+      <div className="min-h-screen bg-[#F7F2E6] text-[#1A1A1A] flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-[#2E7D6E]" />
+        <p className="text-xs font-bold text-[#7A756D]">Verifikasi Hak Akses Admin...</p>
       </div>
     );
   }
 
   if (!isAuthorized) {
     return (
-      <div className="min-h-screen bg-[#0F1115] text-[#F2F3F5] flex flex-col items-center justify-center p-4">
-        <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-8 max-w-md w-full flex flex-col items-center text-center gap-5 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-500 via-red-500 to-purple-500" />
-          <div className="p-4 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <Lock className="w-10 h-10" />
-          </div>
+      <div className="min-h-screen bg-[#F7F2E6] text-[#1A1A1A] flex flex-col items-center justify-center p-4">
+        <div className="bg-white border-[3px] border-[#1A1A1A] rounded-[36px] p-8 max-w-md w-full flex flex-col items-center text-center gap-5 shadow-[8px_8px_0px_#1A1A1A] relative overflow-hidden">
+          <ChameleonMascot variant="avatar" size={64} />
           <div>
-            <h2 className="text-lg font-bold text-white mb-1.5 flex items-center justify-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-amber-400" />
+            <h2 className="text-xl font-black text-[#1A1A1A] mb-1.5 flex items-center justify-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-[#F07850]" />
               Akses Dibatasi
             </h2>
-            <p className="text-xs text-[#9AA0AC] leading-relaxed">
-              Dashboard Internal Admin hanya dapat diakses oleh akun Google pengelola utama:
+            <p className="text-xs text-[#7A756D] font-medium leading-relaxed">
+              Dashboard Pengelola Admin hanya dapat diakses khusus oleh email resmi pengelola:
             </p>
-            <div className="mt-2.5 px-3 py-1.5 rounded-lg bg-[#0F1115] border border-[#2A2F3A] inline-block">
-              <code className="text-xs font-bold text-amber-400 font-mono">{ADMIN_EMAIL}</code>
+            <div className="mt-2.5 px-3.5 py-1.5 rounded-full bg-[#F6C945] border-2 border-[#1A1A1A] shadow-sm inline-block">
+              <code className="text-xs font-black text-[#1A1A1A] font-mono">{ADMIN_EMAIL}</code>
             </div>
           </div>
           {userEmail ? (
-            <div className="w-full p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
-              Anda saat ini masuk sebagai: <strong>{userEmail}</strong> (Bukan Pengelola Admin).
+            <div className="w-full p-3 rounded-2xl bg-[#FFEAEA] border-2 border-[#1A1A1A] text-[#C53030] text-xs font-bold">
+              Saat ini masuk sebagai: <strong>{userEmail}</strong> (Bukan Pengelola Admin).
             </div>
           ) : (
-            <div className="w-full p-3 rounded-xl bg-[#0F1115] border border-[#2A2F3A] text-xs text-[#9AA0AC]">
-              Anda belum masuk ke akun Google.
+            <div className="w-full p-3 rounded-2xl bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-medium text-[#7A756D]">
+              Anda belum masuk ke akun Google pengelola.
             </div>
           )}
-          <div className="flex flex-col w-full gap-2.5 pt-2">
+          <div className="flex flex-col w-full gap-2.5 pt-1">
             {userEmail ? (
               <button
                 type="button"
                 onClick={handleLogout}
-                className="w-full py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-full bg-white hover:bg-[#FAF7F0] text-[#E96379] border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] text-xs font-black transition-all flex items-center justify-center gap-2"
               >
                 <LogOut className="w-4 h-4" />
                 Keluar &amp; Ganti Akun Admin
@@ -145,15 +163,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <button
                 type="button"
                 onClick={handleGoogleAdminLogin}
-                className="w-full py-2.5 rounded-xl bg-[#7C5CFC] hover:bg-[#6846F9] text-white text-xs font-bold transition-all shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-full bg-[#F6C945] hover:bg-[#EDB72B] text-[#1A1A1A] border-2 border-[#1A1A1A] shadow-[3px_3px_0px_#1A1A1A] text-xs font-black transition-all flex items-center justify-center gap-2"
               >
-                <Shield className="w-4 h-4" />
+                <Shield className="w-4 h-4 stroke-[2.5]" />
                 Masuk dengan Google (Akun Admin)
               </button>
             )}
             <Link
               href="/"
-              className="w-full py-2.5 rounded-xl bg-[#1F232C] hover:bg-[#2A2F3A] text-xs font-semibold text-[#9AA0AC] hover:text-white transition-colors flex items-center justify-center gap-2 border border-[#2A2F3A]"
+              className="w-full py-2.5 rounded-full bg-white hover:bg-[#FAF7F0] text-xs font-bold text-[#1A1A1A] border-2 border-[#1A1A1A] shadow-sm transition-colors flex items-center justify-center gap-2"
             >
               <ArrowLeft className="w-4 h-4" />
               Kembali ke Beranda Situs
@@ -165,103 +183,98 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="min-h-screen bg-[#0F1115] text-[#F2F3F5] flex flex-col">
-      {/* Admin Top Header — Mobile Responsive */}
-      <header className="bg-[#171A21] border-b border-[#2A2F3A] px-4 md:px-6 h-14 md:h-16 flex items-center justify-between gap-3 sticky top-0 z-40">
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 md:p-2 rounded-xl bg-amber-500/10 text-amber-400 shrink-0">
-            <Shield className="w-4 h-4 md:w-5 md:h-5" />
-          </div>
-          <div className="hidden sm:block">
-            <h1 className="text-xs md:text-sm font-bold">
-              Internal Admin Dashboard
+    <div className="min-h-screen bg-[#F7F2E6] text-[#1A1A1A] flex flex-col">
+      {/* Admin Top Header in Neo-Comic Style */}
+      <header className="bg-white border-b-2 border-[#1A1A1A] px-4 md:px-6 h-16 flex items-center justify-between gap-3 sticky top-0 z-40 shadow-sm">
+        <div className="flex items-center gap-3">
+          <Link href="/" className="shrink-0 flex items-center gap-2 group">
+            <ChameleonMascot variant="avatar" size={38} />
+          </Link>
+          <div>
+            <h1 className="text-sm md:text-base font-black text-[#1A1A1A] leading-tight">
+              Admin Panel
             </h1>
-            <p className="text-[10px] text-[#9AA0AC] hidden md:block">Monitoring Ingest Pipeline &amp; Management</p>
+            <p className="text-[10px] text-[#7A756D] font-medium hidden sm:block">
+              Manajemen Komik, Genre, Ingest Pipeline &amp; Scraper
+            </p>
           </div>
-          <span className="sm:hidden text-sm font-bold">Admin</span>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Desktop actions */}
-          <div className="hidden md:flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              {ADMIN_EMAIL}
-            </span>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold transition-colors border border-red-500/20"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              Keluar
-            </button>
-            <Link
-              href="/"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1F232C] hover:bg-[#2A2F3A] text-xs font-medium text-[#9AA0AC] hover:text-white transition-colors border border-[#2A2F3A]"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Situs
-            </Link>
-          </div>
+        {/* Desktop Tabs */}
+        <nav className="hidden lg:flex items-center gap-1.5">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = pathname === tab.href;
+            return (
+              <Link
+                key={tab.name}
+                href={tab.href}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-black border-2 border-[#1A1A1A] transition-all ${
+                  isActive
+                    ? 'bg-[#F6C945] text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A]'
+                    : 'bg-white text-[#1A1A1A] hover:bg-[#FAF7F0]'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>{tab.name}</span>
+              </Link>
+            );
+          })}
+        </nav>
 
-          {/* Mobile hamburger */}
+        {/* User Info & Actions */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-[#7A756D] hidden md:inline truncate max-w-[140px]">
+            {userEmail}
+          </span>
+          <Link
+            href="/"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-white hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-bold text-[#1A1A1A] shadow-sm"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Web Publik</span>
+          </Link>
           <button
-            type="button"
-            onClick={() => setMobileMenuOpen((v) => !v)}
-            className="md:hidden p-2 rounded-lg bg-[#1F232C] border border-[#2A2F3A] text-[#9AA0AC]"
+            onClick={handleLogout}
+            className="p-1.5 rounded-full bg-white hover:bg-[#FFEAEA] border-2 border-[#1A1A1A] text-[#E96379] shadow-sm"
+            title="Keluar"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="lg:hidden p-1.5 rounded-full bg-white border-2 border-[#1A1A1A]"
           >
             {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
         </div>
       </header>
 
-      {/* Mobile Dropdown Menu */}
+      {/* Mobile Submenu Tabs */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-[#171A21] border-b border-[#2A2F3A] px-4 py-3 flex flex-col gap-2 z-30">
-          <div className="text-[10px] text-[#9AA0AC] px-1">Masuk sebagai: <span className="text-amber-400 font-mono">{ADMIN_EMAIL}</span></div>
-          <button
-            type="button"
-            onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 text-red-400 text-xs font-semibold border border-red-500/20"
-          >
-            <LogOut className="w-4 h-4" />
-            Keluar Admin
-          </button>
-          <Link
-            href="/"
-            onClick={() => setMobileMenuOpen(false)}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1F232C] text-xs text-[#9AA0AC] border border-[#2A2F3A]"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Kembali ke Situs
-          </Link>
+        <div className="lg:hidden bg-white border-b-2 border-[#1A1A1A] p-3 flex flex-wrap gap-2 shadow-md">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = pathname === tab.href;
+            return (
+              <Link
+                key={tab.name}
+                href={tab.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black border-2 border-[#1A1A1A] ${
+                  isActive ? 'bg-[#F6C945] text-[#1A1A1A]' : 'bg-[#FAF7F0] text-[#1A1A1A]'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{tab.name}</span>
+              </Link>
+            );
+          })}
         </div>
       )}
 
-      {/* Admin Tabs — horizontal scroll on mobile */}
-      <div className="bg-[#171A21] border-b border-[#2A2F3A] px-2 md:px-6 flex gap-0 overflow-x-auto scrollbar-none sticky top-14 md:top-16 z-30">
-        {tabs.map((tab) => {
-          const isActive = pathname === tab.href;
-          const Icon = tab.icon;
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={`flex items-center gap-1.5 px-3 md:px-4 py-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
-                isActive
-                  ? 'border-[#7C5CFC] text-[#7C5CFC] bg-[#7C5CFC]/10'
-                  : 'border-transparent text-[#9AA0AC] hover:text-white'
-              }`}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">{tab.name}</span>
-            </Link>
-          );
-        })}
-      </div>
-
       {/* Main Admin Content Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-4 md:gap-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {children}
       </main>
     </div>

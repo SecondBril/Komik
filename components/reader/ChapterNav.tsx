@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Chapter } from '@/lib/types';
-import { ChevronLeft, ChevronRight, ArrowLeft, MoreVertical, ListOrdered, Smartphone, LayoutList } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ArrowLeft, MoreVertical, ListOrdered, Smartphone, LayoutList, X } from 'lucide-react';
 
 interface ChapterNavProps {
   comicSlug: string;
@@ -64,31 +64,31 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
 
   return (
     <>
-      {/* Auto-Hiding Top Header */}
+      {/* Auto-Hiding Top Header in Neo-Comic Style */}
       <header
         onClick={(e) => e.stopPropagation()}
-        className={`fixed top-0 left-0 right-0 z-40 bg-[#171A21]/95 backdrop-blur-md border-b border-[#2A2F3A] transition-all duration-300 ${
+        className={`fixed top-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b-2 border-[#1A1A1A] transition-all duration-300 ${
           isNavVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
         }`}
       >
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3 text-[#F2F3F5]">
+        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3 text-[#1A1A1A]">
           <Link
             href={`/komik/${comicSlug}`}
-            className="flex items-center gap-1.5 text-xs font-semibold text-[#9AA0AC] hover:text-white transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F7F2E6] hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] transition-all active:translate-x-[1px] active:translate-y-[1px]"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 stroke-[2.5]" />
             <span className="hidden sm:inline">Kembali</span>
           </Link>
 
           {/* Title & Quick Jump Selector */}
           <div className="flex items-center gap-2 max-w-[60%]">
-            <h1 className="text-xs sm:text-sm font-bold truncate">{comicTitle}</h1>
+            <h1 className="text-xs sm:text-sm font-black text-[#1A1A1A] truncate">{comicTitle}</h1>
             <button
               type="button"
               onClick={() => setIsJumpModalOpen(!isJumpModalOpen)}
-              className="px-2.5 py-1 rounded-lg bg-[#1F232C] border border-[#2A2F3A] text-xs font-bold text-[#7C5CFC] hover:bg-[#7C5CFC]/10 transition-colors flex items-center gap-1 shrink-0"
+              className="px-2.5 py-1 rounded-full bg-[#F6C945] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#EDB72B] transition-all flex items-center gap-1 shrink-0 active:translate-x-[1px] active:translate-y-[1px]"
             >
-              Ch. {currentChapterNumber}
+              <span>Ch. {currentChapterNumber}</span>
               <ListOrdered className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -98,15 +98,15 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
             <button
               type="button"
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="p-1.5 rounded-lg text-[#9AA0AC] hover:text-white hover:bg-[#1F232C] transition-colors"
+              className="p-1.5 rounded-full bg-white border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] text-[#1A1A1A] hover:bg-[#FAF7F0] transition-colors"
             >
-              <MoreVertical className="w-5 h-5" />
+              <MoreVertical className="w-4 h-4" />
             </button>
 
             {isMenuOpen && (
-              <div className="absolute right-0 top-10 w-56 bg-[#171A21] border border-[#2A2F3A] rounded-xl shadow-2xl py-2 z-50 animate-fade-in divide-y divide-[#2A2F3A]">
+              <div className="absolute right-0 top-10 w-56 bg-white border-2 border-[#1A1A1A] rounded-2xl shadow-[4px_4px_0px_#1A1A1A] py-2 z-50 divide-y divide-[#E8E3D7]">
                 <div>
-                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#9AA0AC]">
+                  <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-[#7A756D]">
                     Mode Baca
                   </div>
                   <button
@@ -115,8 +115,8 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
                       onToggleReadMode('scroll');
                       setIsMenuOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${
-                      readMode === 'scroll' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
+                    className={`w-full text-left px-3 py-2 text-xs font-bold flex items-center gap-2 ${
+                      readMode === 'scroll' ? 'text-[#2E7D6E] bg-[#E6F4EA]' : 'text-[#1A1A1A] hover:bg-[#FAF7F0]'
                     }`}
                   >
                     <Smartphone className="w-4 h-4" />
@@ -128,82 +128,41 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
                       onToggleReadMode('paged');
                       setIsMenuOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${
-                      readMode === 'paged' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
+                    className={`w-full text-left px-3 py-2 text-xs font-bold flex items-center gap-2 ${
+                      readMode === 'paged' ? 'text-[#2E7D6E] bg-[#E6F4EA]' : 'text-[#1A1A1A] hover:bg-[#FAF7F0]'
                     }`}
                   >
                     <LayoutList className="w-4 h-4" />
                     Page-by-Page (Manga)
                   </button>
                 </div>
-
-                {onToggleContainerWidth && (
-                  <div className="pt-1.5">
-                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#9AA0AC]">
-                      Lebar Tampilan
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onToggleContainerWidth('normal');
-                        setIsMenuOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
-                        containerWidth === 'normal' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
-                      }`}
-                    >
-                      <span>Sedang (768px)</span>
-                      {containerWidth === 'normal' && <span className="text-[10px]">✓</span>}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onToggleContainerWidth('large');
-                        setIsMenuOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
-                        containerWidth === 'large' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
-                      }`}
-                    >
-                      <span>Besar (1024px)</span>
-                      {containerWidth === 'large' && <span className="text-[10px]">✓</span>}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onToggleContainerWidth('full');
-                        setIsMenuOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
-                        containerWidth === 'full' ? 'text-[#7C5CFC] font-bold bg-[#1F232C]' : 'text-[#9AA0AC] hover:text-white'
-                      }`}
-                    >
-                      <span>Layar Penuh (100%)</span>
-                      {containerWidth === 'full' && <span className="text-[10px]">✓</span>}
-                    </button>
-                  </div>
-                )}
               </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Quick Jump Modal */}
+      {/* Chapter Jump Selector Modal */}
       {isJumpModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl w-full max-w-sm max-h-[70vh] flex flex-col p-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#2A2F3A]">
-              <h3 className="text-sm font-bold text-[#F2F3F5]">Pilih Chapter</h3>
+        <div
+          onClick={() => setIsJumpModalOpen(false)}
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md max-h-[75vh] bg-[#F7F2E6] border-[3px] border-[#1A1A1A] rounded-[32px] p-5 shadow-[6px_6px_0px_#1A1A1A] flex flex-col"
+          >
+            <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A1A]">
+              <h2 className="text-base font-black text-[#1A1A1A]">Pilih Chapter</h2>
               <button
                 type="button"
                 onClick={() => setIsJumpModalOpen(false)}
-                className="text-xs text-[#9AA0AC] hover:text-white"
+                className="w-8 h-8 rounded-full bg-white border-2 border-[#1A1A1A] flex items-center justify-center text-[#1A1A1A]"
               >
-                Tutup
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto divide-y divide-[#2A2F3A] my-2 pr-1">
+            <div className="flex-1 overflow-y-auto my-2 pr-1 flex flex-col gap-1.5">
               {[...allChapters]
                 .sort((a, b) => b.chapter_number - a.chapter_number)
                 .map((ch) => (
@@ -214,14 +173,14 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
                       setIsJumpModalOpen(false);
                       router.push(`/komik/${comicSlug}/${ch.chapter_number}`);
                     }}
-                    className={`w-full text-left py-2.5 px-2 flex items-center justify-between text-xs transition-colors ${
+                    className={`w-full text-left py-2.5 px-3 rounded-xl border-2 border-[#1A1A1A] flex items-center justify-between text-xs font-bold transition-all ${
                       ch.chapter_number === currentChapterNumber
-                        ? 'text-[#7C5CFC] font-bold bg-[#7C5CFC]/10 rounded-lg'
-                        : 'text-[#9AA0AC] hover:text-white'
+                        ? 'bg-[#F6C945] shadow-[2px_2px_0px_#1A1A1A]'
+                        : 'bg-white hover:bg-[#FAF7F0] shadow-sm'
                     }`}
                   >
                     <span>Chapter {ch.chapter_number}</span>
-                    {ch.title && <span className="text-[11px] text-[#5B616D] truncate max-w-[150px]">{ch.title}</span>}
+                    {ch.title && <span className="text-[11px] text-[#7A756D] truncate max-w-[150px]">{ch.title}</span>}
                   </button>
                 ))}
             </div>
@@ -232,7 +191,7 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
       {/* Auto-Hiding Floating Bottom Navigation Bar */}
       <nav
         onClick={(e) => e.stopPropagation()}
-        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#171A21]/95 border border-[#2A2F3A] backdrop-blur-md rounded-full shadow-2xl px-4 py-2 flex items-center gap-3 text-[#F2F3F5] transition-all duration-300 ${
+        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-white border-2 border-[#1A1A1A] rounded-full shadow-[4px_4px_0px_#1A1A1A] px-4 py-2 flex items-center gap-3 text-[#1A1A1A] transition-all duration-300 ${
           isNavVisible
             ? 'translate-y-0 opacity-100'
             : 'translate-y-24 opacity-0 pointer-events-none'
@@ -241,27 +200,29 @@ export const ChapterNav: React.FC<ChapterNavProps> = ({
         {prevChapter ? (
           <Link
             href={`/komik/${comicSlug}/${prevChapter.chapter_number}`}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#1F232C] hover:bg-[#7C5CFC] hover:text-white text-xs font-semibold text-[#9AA0AC] transition-all"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#F7F2E6] hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] transition-all active:translate-x-[1px] active:translate-y-[1px]"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
             <span>Ch. {prevChapter.chapter_number}</span>
           </Link>
         ) : (
-          <span className="px-3 py-1.5 text-xs text-[#5B616D] cursor-not-allowed">Ch. Awal</span>
+          <span className="px-3 py-1.5 text-xs font-bold text-[#A6A095] cursor-not-allowed">Ch. Awal</span>
         )}
 
-        <span className="text-xs font-bold text-[#7C5CFC] px-1">Ch. {currentChapterNumber}</span>
+        <span className="text-xs font-black text-[#1A1A1A] px-1 bg-[#F6C945] py-1 rounded-lg border border-[#1A1A1A]">
+          Ch. {currentChapterNumber}
+        </span>
 
         {nextChapter ? (
           <Link
             href={`/komik/${comicSlug}/${nextChapter.chapter_number}`}
-            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full bg-[#7C5CFC] hover:bg-[#6A47F0] text-white text-xs font-bold transition-all shadow-md shadow-[#7C5CFC]/20"
+            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full bg-[#2E7D6E] hover:bg-[#236357] text-white text-xs font-black border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] transition-all active:translate-x-[1px] active:translate-y-[1px]"
           >
             <span>Ch. {nextChapter.chapter_number}</span>
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-4 h-4 stroke-[2.5]" />
           </Link>
         ) : (
-          <span className="px-3 py-1.5 text-xs text-[#5B616D] cursor-not-allowed">Ch. Terbaru</span>
+          <span className="px-3 py-1.5 text-xs font-bold text-[#A6A095] cursor-not-allowed">Ch. Terbaru</span>
         )}
       </nav>
     </>

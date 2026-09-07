@@ -22,6 +22,7 @@ export async function GET() {
         synopsis,
         rating,
         created_at,
+        genres:comic_genres(genres(id, name, slug)),
         chapters:chapters(count)
       `)
       .order('title', { ascending: true });
@@ -32,6 +33,7 @@ export async function GET() {
 
     const formattedComics = comics.map((c: any) => ({
       ...c,
+      genres: c.genres?.map((g: any) => g.genres).filter(Boolean) || [],
       total_chapters: c.chapters?.[0]?.count || 0,
     }));
 
@@ -49,7 +51,7 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { id, title, slug, synopsis, author, status, type, cover_url, rating } = body;
+    const { id, title, slug, synopsis, author, status, type, cover_url, rating, genre_ids } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Parameter id komik wajib diisi' }, { status: 400 });
@@ -65,13 +67,33 @@ export async function PUT(req: NextRequest) {
     if (cover_url !== undefined) updateFields.cover_url = cover_url;
     if (rating !== undefined) updateFields.rating = Number(rating);
 
-    const { error } = await supabase
-      .from('comics')
-      .update(updateFields)
-      .eq('id', id);
+    if (Object.keys(updateFields).length > 0) {
+      const { error } = await supabase
+        .from('comics')
+        .update(updateFields)
+        .eq('id', id);
 
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      if (error) {
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      }
+    }
+
+    // Update genres relation if genre_ids is provided
+    if (Array.isArray(genre_ids)) {
+      // 1. Remove existing genre relations
+      await supabase.from('comic_genres').delete().eq('comic_id', id);
+
+      // 2. Insert new genre relations
+      if (genre_ids.length > 0) {
+        const rows = genre_ids.map((genre_id: number) => ({
+          comic_id: id,
+          genre_id: Number(genre_id),
+        }));
+        const { error: insertError } = await supabase.from('comic_genres').insert(rows);
+        if (insertError) {
+          console.error('[Admin Comics] Failed to update comic_genres:', insertError.message);
+        }
+      }
     }
 
     return NextResponse.json({ success: true, message: 'Komik berhasil diperbarui.' });
@@ -101,46 +123,28 @@ export async function DELETE(req: NextRequest) {
       .eq('id', comicId)
       .single();
 
-    // 2. Get all chapters of this comic
-    const { data: chapters } = await supabase
-      .from('chapters')
-      .select('id, chapter_number')
-      .eq('comic_id', comicId);
-
-    if (chapters && chapters.length > 0) {
-      const chapterIds = chapters.map((ch) => ch.id);
-
-      // 3. Delete chapter pages from DB
-      await supabase.from('chapter_pages').delete().in('chapter_id', chapterIds);
-
-      // 4. Delete chapters from DB
-      await supabase.from('chapters').delete().eq('comic_id', comicId);
-
-      // 5. Delete ImageKit files (fire-and-forget, one folder per comic slug)
-      if (comic?.slug) {
-        const ikFolderPath = `/comics/${comic.slug}`;
-        deleteImageKitFolder(ikFolderPath).then((result) => {
-          if (!result.success) {
-            console.warn('[ImageKit Comic Delete Warning]', result.message);
-          } else {
-            console.log('[ImageKit Comic Delete]', result.message);
-          }
-        });
+    if (comic?.slug) {
+      const folderPath = `comics/${comic.slug}`;
+      const ikResult = await deleteImageKitFolder(folderPath);
+      if (!ikResult.success) {
+        console.warn(`[Admin Comic Delete] ImageKit cleanup warning for ${folderPath}:`, ikResult.message);
       }
     }
 
-    // 6. Delete relationships
+    // 2. Delete comic_genres junction rows first
     await supabase.from('comic_genres').delete().eq('comic_id', comicId);
-    await supabase.from('reading_history').delete().eq('comic_id', comicId);
 
-    // 7. Delete comic record
+    // 3. Delete from Supabase
     const { error } = await supabase.from('comics').delete().eq('id', comicId);
 
     if (error) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: 'Komik beserta seluruh chapter dan aset CDN berhasil dihapus.' });
+    return NextResponse.json({
+      success: true,
+      message: 'Komik berhasil dihapus dari database.',
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err?.message || 'Gagal menghapus komik' }, { status: 500 });
   }

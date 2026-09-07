@@ -17,10 +17,10 @@ export const ComicCard: React.FC<ComicCardProps> = ({ comic, priority = false })
   return (
     <Link
       href={`/komik/${comic.slug}`}
-      className="group flex flex-col rounded-xl overflow-hidden bg-[#171A21] border border-[#2A2F3A] hover:border-[#7C5CFC]/50 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:shadow-[#7C5CFC]/10"
+      className="group flex flex-col rounded-2xl overflow-hidden bg-white border-2 border-[#1A1A1A] shadow-[3px_3px_0px_#1A1A1A] hover:shadow-[5px_5px_0px_#1A1A1A] hover:-translate-y-0.5 transition-all duration-150"
     >
       {/* Cover Image Container (2:3 aspect ratio) */}
-      <div className="relative w-full aspect-[2/3] overflow-hidden bg-[#1F232C]">
+      <div className="relative w-full aspect-[2/3] overflow-hidden bg-[#FAF7F0] border-b-2 border-[#1A1A1A]">
         <Image
           src={comic.cover_url}
           alt={`${comic.title} Cover`}
@@ -39,24 +39,24 @@ export const ComicCard: React.FC<ComicCardProps> = ({ comic, priority = false })
           <TypeBadge type={comic.type} />
         </div>
 
-        {/* Rating overlay badge */}
-        <div className="absolute bottom-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-md text-[11px] font-bold text-amber-400">
-          <Star className="w-3 h-3 fill-amber-400 stroke-none" />
+        {/* Rating overlay badge in Yellow Pill */}
+        <div className="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#F6C945] border border-[#1A1A1A] text-[11px] font-extrabold text-[#1A1A1A] shadow-sm">
+          <Star className="w-3 h-3 fill-[#1A1A1A] stroke-none" />
           <span>{comic.rating.toFixed(1)}</span>
         </div>
       </div>
 
       {/* Comic Content Info */}
       <div className="p-3 flex flex-col justify-between flex-grow gap-2">
-        <h3 className="text-sm sm:text-base font-semibold text-[#F2F3F5] line-clamp-2 leading-snug group-hover:text-[#7C5CFC] transition-colors">
+        <h3 className="text-sm font-extrabold text-[#1A1A1A] line-clamp-2 leading-snug group-hover:text-[#2E7D6E] transition-colors">
           {comic.title}
         </h3>
 
-        <div className="flex items-center justify-between text-xs text-[#9AA0AC] pt-1 border-t border-[#2A2F3A]/60">
-          <span className="font-medium text-[#F2F3F5]/90">
+        <div className="flex items-center justify-between text-xs text-[#7A756D] pt-1.5 border-t border-[#E8E3D7]">
+          <span className="font-bold text-[#1A1A1A] bg-[#F7F2E6] px-2 py-0.5 rounded-full border border-[#D9D3C5] text-[11px]">
             {comic.latest_chapter ? `Ch. ${comic.latest_chapter.chapter_number}` : 'Ch. 1'}
           </span>
-          <span className="text-[11px]">
+          <span className="text-[11px] font-medium">
             {comic.latest_chapter ? formatRelativeTime(comic.latest_chapter.released_at) : 'Baru'}
           </span>
         </div>

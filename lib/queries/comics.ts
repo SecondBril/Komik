@@ -23,6 +23,55 @@ export async function getGenres(): Promise<Genre[]> {
   return MOCK_GENRES;
 }
 
+export async function getGenresWithCounts(): Promise<(Genre & { count: number })[]> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data: genresData, error: genresError } = await supabase
+        .from('genres')
+        .select('id, name, slug')
+        .order('name');
+
+      if (!genresError && genresData && genresData.length > 0) {
+        const { data: comicGenres } = await supabase
+          .from('comic_genres')
+          .select('genre_id, comics(id)');
+
+        const counts: Record<number, number> = {};
+        if (comicGenres) {
+          comicGenres.forEach((cg: any) => {
+            if (cg.comics) {
+              counts[cg.genre_id] = (counts[cg.genre_id] || 0) + 1;
+            }
+          });
+        }
+
+        return genresData.map((g: any) => ({
+          id: g.id,
+          name: g.name,
+          slug: g.slug,
+          count: counts[g.id] || 0,
+        }));
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  // Fallback calculation from MOCK_COMICS
+  const fallbackCounts: Record<number, number> = {};
+  MOCK_COMICS.forEach((c) => {
+    c.genres?.forEach((g) => {
+      fallbackCounts[g.id] = (fallbackCounts[g.id] || 0) + 1;
+    });
+  });
+
+  return MOCK_GENRES.map((g) => ({
+    ...g,
+    count: fallbackCounts[g.id] || 0,
+  }));
+}
+
 export async function getComics(filters?: FilterState): Promise<Comic[]> {
   const supabase = getSupabaseClient();
   

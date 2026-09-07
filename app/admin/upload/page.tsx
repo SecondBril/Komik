@@ -15,6 +15,7 @@ import {
   ArrowRight,
   Loader2,
   FileImage,
+  ChevronDown,
 } from 'lucide-react';
 
 interface ComicOption {
@@ -111,7 +112,6 @@ export default function AdminUploadPage() {
   const handlePageFilesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFiles = Array.from(e.target.files);
-      // Sort files naturally by filename (01.jpg, 02.jpg, ...)
       selectedFiles.sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
       );
@@ -140,18 +140,29 @@ export default function AdminUploadPage() {
     setErrorMessage(null);
     setSuccessResult(null);
 
-    if (isNewComic && !title.trim()) {
-      setErrorMessage('Judul komik wajib diisi.');
-      return;
-    }
-
-    if (!isNewComic && !selectedComicId) {
-      setErrorMessage('Silakan pilih komik yang sudah ada terlebih dahulu.');
-      return;
-    }
-
     if (pageFiles.length === 0) {
-      setErrorMessage('Unggah setidaknya 1 gambar halaman chapter komik.');
+      setErrorMessage('Pilih minimal 1 gambar halaman untuk diunggah.');
+      return;
+    }
+
+    if (isNewComic) {
+      if (!title.trim()) {
+        setErrorMessage('Judul komik wajib diisi.');
+        return;
+      }
+      if (!coverFile) {
+        setErrorMessage('File gambar cover komik wajib dipilih.');
+        return;
+      }
+    } else {
+      if (!selectedComicId) {
+        setErrorMessage('Pilih komik terlebih dahulu.');
+        return;
+      }
+    }
+
+    if (!chapterNumber) {
+      setErrorMessage('Nomor chapter wajib diisi.');
       return;
     }
 
@@ -159,7 +170,7 @@ export default function AdminUploadPage() {
 
     try {
       const formData = new FormData();
-      formData.append('isNewComic', isNewComic ? 'true' : 'false');
+      formData.append('isNewComic', String(isNewComic));
 
       if (isNewComic) {
         formData.append('title', title);
@@ -167,12 +178,12 @@ export default function AdminUploadPage() {
         formData.append('type', type);
         formData.append('synopsis', synopsis);
         formData.append('author', author);
-        formData.append('status', comicStatus);
+        formData.append('comicStatus', comicStatus);
         if (coverFile) {
           formData.append('coverFile', coverFile);
         }
       } else {
-        formData.append('comicId', selectedComicId);
+        formData.append('selectedComicId', selectedComicId);
       }
 
       formData.append('chapterNumber', chapterNumber);
@@ -187,19 +198,34 @@ export default function AdminUploadPage() {
         body: formData,
       });
 
-      const result = await res.json();
+      const data = await res.json();
 
-      if (!res.ok || !result.success) {
-        throw new Error(result.error || 'Terjadi kesalahan saat mengunggah komik.');
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Gagal mengunggah chapter komik.');
       }
 
       setSuccessResult({
-        comicSlug: result.comicSlug || slug || 'solo-leveling',
-        chapterNumber: result.chapterNumber || chapterNumber,
-        message: result.message || 'Komik & Chapter berhasil diproses dan dikonversi ke WebP!',
+        comicSlug: data.comicSlug,
+        chapterNumber: data.chapterNumber,
+        message: data.message || 'Chapter berhasil diunggah dan dioptimasi ke WebP!',
       });
 
-      // Reset Page Files
+      // Increment chapter number for convenience
+      const currentNum = parseFloat(chapterNumber);
+      if (!isNaN(currentNum)) {
+        setChapterNumber(String(currentNum + 1));
+      }
+      setChapterTitle('');
+
+      // Refresh existing comics list
+      fetch('/api/admin/comics')
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.success && Array.isArray(json.data)) {
+            setExistingComics(json.data);
+          }
+        });
+
       setPageFiles([]);
       setPagePreviews([]);
     } catch (err: any) {
@@ -212,20 +238,22 @@ export default function AdminUploadPage() {
   return (
     <div className="flex flex-col gap-6">
       {/* Header Banner */}
-      <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="p-3.5 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
-            <Upload className="w-6 h-6" />
+      <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-[4px_4px_0px_#1A1A1A] flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-[#F6C945] border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] flex items-center justify-center shrink-0">
+            <Upload className="w-6 h-6 text-[#1A1A1A] stroke-[2.5]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-white">Input Komik & Chapter Manual</h2>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                <Zap className="w-3 h-3" /> Auto WebP Converter
+              <h2 className="text-lg sm:text-xl font-black text-[#1A1A1A] tracking-tight">
+                Input Komik &amp; Chapter Manual
+              </h2>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-[#2E7D6E] text-white border-2 border-[#1A1A1A] shadow-sm flex items-center gap-1">
+                <Zap className="w-3 h-3 fill-current" /> Auto WebP
               </span>
             </div>
-            <p className="text-xs text-[#9AA0AC] mt-0.5">
-              Unggah file gambar komik (.png/.jpg/.jpeg). Server akan mengonversinya secara otomatis ke format <strong>WebP (Quality 80)</strong> untuk kecepatan loading tinggi.
+            <p className="text-xs text-[#7A756D] font-medium mt-0.5">
+              Unggah file gambar komik. Server akan mengonversinya secara otomatis ke format <strong>WebP (Quality 80)</strong> untuk kecepatan loading tinggi.
             </p>
           </div>
         </div>
@@ -233,19 +261,19 @@ export default function AdminUploadPage() {
 
       {/* Success Notification */}
       {successResult && (
-        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 flex items-start justify-between gap-4">
+        <div className="p-4 rounded-2xl bg-[#E6F4EA] border-2 border-[#1A1A1A] text-[#137333] shadow-[3px_3px_0px_#1A1A1A] flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+            <CheckCircle2 className="w-5 h-5 text-[#137333] mt-0.5 shrink-0" />
             <div>
-              <h3 className="text-sm font-bold text-emerald-200">Upload & Konversi Berhasil!</h3>
-              <p className="text-xs text-emerald-300/80 mt-1">{successResult.message}</p>
+              <h3 className="text-sm font-black text-[#137333]">Upload &amp; Konversi Berhasil!</h3>
+              <p className="text-xs text-[#137333]/90 mt-0.5 font-medium">{successResult.message}</p>
             </div>
           </div>
           <Link
             href={`/komik/${successResult.comicSlug}/${successResult.chapterNumber}`}
-            className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-xs font-bold text-slate-950 transition-colors flex items-center gap-1.5 shrink-0"
+            className="px-4 py-1.5 rounded-full bg-[#137333] hover:bg-[#0e5726] text-xs font-black text-white border-2 border-[#1A1A1A] shadow-sm flex items-center gap-1.5 shrink-0"
           >
-            Baca Chapter Now
+            Baca Chapter
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
@@ -253,9 +281,9 @@ export default function AdminUploadPage() {
 
       {/* Error Notification */}
       {errorMessage && (
-        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-          <p className="text-xs font-medium">{errorMessage}</p>
+        <div className="p-4 rounded-2xl bg-[#FFEAEA] border-2 border-[#1A1A1A] text-[#C53030] shadow-[3px_3px_0px_#1A1A1A] flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-[#C53030] shrink-0" />
+          <p className="text-xs font-bold">{errorMessage}</p>
         </div>
       )}
 
@@ -263,137 +291,145 @@ export default function AdminUploadPage() {
         {/* Left Column: Comic & Chapter Metadata */}
         <div className="lg:col-span-1 flex flex-col gap-6">
           {/* Mode Selector */}
-          <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-5 flex flex-col gap-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#9AA0AC]">Mode Input</h3>
+          <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-5 shadow-[3px_3px_0px_#1A1A1A] flex flex-col gap-3">
+            <h3 className="text-[11px] font-black uppercase tracking-wider text-[#7A756D]">
+              Pilih Mode Input
+            </h3>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setIsNewComic(true)}
-                className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-xl border text-xs font-bold transition-all ${
+                className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl border-2 text-xs font-black transition-all ${
                   isNewComic
-                    ? 'bg-[#7C5CFC]/10 border-[#7C5CFC] text-[#7C5CFC]'
-                    : 'bg-[#1F232C] border-[#2A2F3A] text-[#9AA0AC] hover:text-white'
+                    ? 'bg-[#F6C945] text-[#1A1A1A] border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A]'
+                    : 'bg-[#FAF7F0] border-[#1A1A1A]/20 text-[#7A756D] hover:text-[#1A1A1A]'
                 }`}
               >
                 <PlusCircle className="w-5 h-5" />
-                Buat Komik Baru
+                <span>Buat Komik Baru</span>
               </button>
               <button
                 type="button"
                 onClick={() => setIsNewComic(false)}
-                className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-xl border text-xs font-bold transition-all ${
+                className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl border-2 text-xs font-black transition-all ${
                   !isNewComic
-                    ? 'bg-[#7C5CFC]/10 border-[#7C5CFC] text-[#7C5CFC]'
-                    : 'bg-[#1F232C] border-[#2A2F3A] text-[#9AA0AC] hover:text-white'
+                    ? 'bg-[#F6C945] text-[#1A1A1A] border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A]'
+                    : 'bg-[#FAF7F0] border-[#1A1A1A]/20 text-[#7A756D] hover:text-[#1A1A1A]'
                 }`}
               >
                 <FolderPlus className="w-5 h-5" />
-                Pilih Existing
+                <span>Pilih Existing</span>
               </button>
             </div>
           </div>
 
           {/* New Comic Information */}
           {isNewComic ? (
-            <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-5 flex flex-col gap-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#9AA0AC] flex items-center gap-2">
-                <BookOpen className="w-4 h-4 text-purple-400" /> Information Komik Baru
+            <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-5 shadow-[3px_3px_0px_#1A1A1A] flex flex-col gap-4">
+              <h3 className="text-[11px] font-black uppercase tracking-wider text-[#1A1A1A] flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-[#2E7D6E]" /> Informasi Komik Baru
               </h3>
 
               {/* Title */}
               <div>
-                <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Judul Komik *</label>
+                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Judul Komik *</label>
                 <input
                   type="text"
                   required
                   placeholder="Misal: Solo Leveling Ragnarok"
                   value={title}
                   onChange={(e) => handleTitleChange(e.target.value)}
-                  className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-[#5A606E] focus:outline-none focus:border-[#7C5CFC]"
+                  className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl px-3.5 py-2 text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
                 />
               </div>
 
               {/* Slug */}
               <div>
-                <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Slug URL</label>
+                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Slug URL</label>
                 <input
                   type="text"
                   required
                   placeholder="solo-leveling-ragnarok"
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
-                  className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl px-3.5 py-2.5 text-xs text-amber-400 font-mono focus:outline-none focus:border-[#7C5CFC]"
+                  className="w-full bg-[#FAF7F0] border-2 border-[#1A1A1A] rounded-xl px-3.5 py-2 text-xs text-[#1A1A1A] font-mono focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
                 />
               </div>
 
               {/* Type & Status */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Tipe Komik</label>
-                  <select
-                    value={type}
-                    onChange={(e) => setType(e.target.value)}
-                    className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#7C5CFC]"
-                  >
-                    <option value="manhwa">Manhwa (Korea)</option>
-                    <option value="manga">Manga (Jepang)</option>
-                    <option value="manhua">Manhua (China)</option>
-                  </select>
+                  <label className="block text-xs font-black text-[#1A1A1A] mb-1">Tipe Komik</label>
+                  <div className="relative">
+                    <select
+                      value={type}
+                      onChange={(e) => setType(e.target.value)}
+                      className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl px-3 py-2 text-xs font-bold text-[#1A1A1A] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E] appearance-none pr-8 capitalize"
+                    >
+                      <option value="manhwa">Manhwa</option>
+                      <option value="manga">Manga</option>
+                      <option value="manhua">Manhua</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-[#1A1A1A] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Status</label>
-                  <select
-                    value={comicStatus}
-                    onChange={(e) => setComicStatus(e.target.value)}
-                    className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#7C5CFC]"
-                  >
-                    <option value="ongoing">Ongoing</option>
-                    <option value="completed">Completed</option>
-                  </select>
+                  <label className="block text-xs font-black text-[#1A1A1A] mb-1">Status</label>
+                  <div className="relative">
+                    <select
+                      value={comicStatus}
+                      onChange={(e) => setComicStatus(e.target.value)}
+                      className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl px-3 py-2 text-xs font-bold text-[#1A1A1A] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E] appearance-none pr-8 capitalize"
+                    >
+                      <option value="ongoing">Ongoing</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-[#1A1A1A] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
               </div>
 
               {/* Author */}
               <div>
-                <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Pengarang / Author</label>
+                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Author / Pengarang</label>
                 <input
                   type="text"
                   placeholder="Misal: Chugong / DUBU"
                   value={author}
                   onChange={(e) => setAuthor(e.target.value)}
-                  className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-[#5A606E] focus:outline-none focus:border-[#7C5CFC]"
+                  className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl px-3.5 py-2 text-xs font-bold text-[#1A1A1A] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
                 />
               </div>
 
               {/* Synopsis */}
               <div>
-                <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Sinopsis</label>
+                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Sinopsis</label>
                 <textarea
                   rows={3}
-                  placeholder="Deskripsi singkat mengenai jalan cerita komik..."
+                  placeholder="Deskripsi cerita komik..."
                   value={synopsis}
                   onChange={(e) => setSynopsis(e.target.value)}
-                  className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl p-3 text-xs text-white placeholder-[#5A606E] focus:outline-none focus:border-[#7C5CFC] resize-none"
+                  className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl p-3 text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E] resize-none"
                 />
               </div>
 
               {/* Cover Image Upload */}
               <div>
-                <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Gambar Cover Komik</label>
+                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Cover Komik *</label>
                 <div className="flex items-center gap-3">
                   {coverPreview ? (
-                    <div className="relative w-16 h-20 rounded-lg overflow-hidden border border-[#2A2F3A] shrink-0">
+                    <div className="relative w-16 h-22 rounded-xl overflow-hidden border-2 border-[#1A1A1A] shadow-sm shrink-0 bg-[#FAF7F0]">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={coverPreview} alt="Cover Preview" className="w-full h-full object-cover" />
                     </div>
                   ) : (
-                    <div className="w-16 h-20 rounded-lg border border-dashed border-[#2A2F3A] bg-[#0F1115] flex flex-col items-center justify-center shrink-0 text-[#9AA0AC]">
-                      <ImageIcon className="w-5 h-5" />
+                    <div className="w-16 h-22 rounded-xl border-2 border-dashed border-[#1A1A1A] bg-[#FAF7F0] flex flex-col items-center justify-center shrink-0 text-[#7A756D]">
+                      <ImageIcon className="w-6 h-6" />
                     </div>
                   )}
-                  <label className="flex-1 cursor-pointer bg-[#0F1115] hover:bg-[#1F232C] border border-[#2A2F3A] rounded-xl p-3 text-center transition-colors">
-                    <span className="text-xs text-[#7C5CFC] font-semibold block">Pilih Gambar Cover</span>
-                    <span className="text-[10px] text-[#9AA0AC]">JPG, PNG, WebP</span>
+                  <label className="flex-1 cursor-pointer bg-[#FAF7F0] hover:bg-[#F6C945] border-2 border-[#1A1A1A] rounded-xl p-3 text-center transition-all shadow-sm">
+                    <span className="text-xs font-black text-[#1A1A1A] block">Pilih Gambar Cover</span>
+                    <span className="text-[10px] text-[#7A756D] font-bold">JPG, PNG, WebP</span>
                     <input type="file" accept="image/*" onChange={handleCoverSelect} className="hidden" />
                   </label>
                 </div>
@@ -401,41 +437,44 @@ export default function AdminUploadPage() {
             </div>
           ) : (
             /* Select Existing Comic */
-            <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-5 flex flex-col gap-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#9AA0AC]">Pilih Komik</h3>
+            <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-5 shadow-[3px_3px_0px_#1A1A1A] flex flex-col gap-4">
+              <h3 className="text-[11px] font-black uppercase tracking-wider text-[#1A1A1A]">Pilih Komik</h3>
               {loadingComics ? (
-                <div className="flex items-center justify-center py-6 text-xs text-[#9AA0AC] gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-[#7C5CFC]" /> Memuat daftar komik...
+                <div className="flex items-center justify-center py-6 text-xs font-bold text-[#7A756D] gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#2E7D6E]" /> Memuat daftar komik...
                 </div>
               ) : existingComics.length === 0 ? (
-                <p className="text-xs text-amber-400 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20">
+                <p className="text-xs font-bold text-[#C53030] bg-[#FFEAEA] p-3 rounded-2xl border-2 border-[#1A1A1A]">
                   Belum ada komik di database. Silakan pilih mode &quot;Buat Komik Baru&quot;.
                 </p>
               ) : (
                 <div>
-                  <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Pilih dari Database</label>
-                  <select
-                    value={selectedComicId}
-                    onChange={(e) => setSelectedComicId(e.target.value)}
-                    className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl p-3 text-xs text-white focus:outline-none focus:border-[#7C5CFC]"
-                  >
-                    {existingComics.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.title} ({c.type.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-black text-[#1A1A1A] mb-1">Pilih dari Database</label>
+                  <div className="relative">
+                    <select
+                      value={selectedComicId}
+                      onChange={(e) => setSelectedComicId(e.target.value)}
+                      className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl p-3 text-xs font-bold text-[#1A1A1A] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E] appearance-none pr-8"
+                    >
+                      {existingComics.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.title} ({c.type.toUpperCase()})
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-[#1A1A1A] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {/* Chapter Information */}
-          <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-5 flex flex-col gap-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#9AA0AC]">Informasi Chapter</h3>
+          <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-5 shadow-[3px_3px_0px_#1A1A1A] flex flex-col gap-4">
+            <h3 className="text-[11px] font-black uppercase tracking-wider text-[#1A1A1A]">Informasi Chapter</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Nomor Chapter *</label>
+                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Nomor Chapter *</label>
                 <input
                   type="number"
                   step="0.1"
@@ -443,17 +482,17 @@ export default function AdminUploadPage() {
                   placeholder="1"
                   value={chapterNumber}
                   onChange={(e) => setChapterNumber(e.target.value)}
-                  className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#7C5CFC]"
+                  className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl px-3.5 py-2 text-xs font-bold text-[#1A1A1A] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-[#9AA0AC] mb-1.5">Judul Chapter</label>
+                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Judul Chapter</label>
                 <input
                   type="text"
                   placeholder="Awal Petualangan"
                   value={chapterTitle}
                   onChange={(e) => setChapterTitle(e.target.value)}
-                  className="w-full bg-[#0F1115] border border-[#2A2F3A] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#7C5CFC]"
+                  className="w-full bg-white border-2 border-[#1A1A1A] rounded-xl px-3.5 py-2 text-xs font-bold text-[#1A1A1A] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
                 />
               </div>
             </div>
@@ -462,21 +501,21 @@ export default function AdminUploadPage() {
 
         {/* Right Column: Multiple Chapter Page Dropzone & Preview */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-          <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-6 flex flex-col gap-6 flex-1">
+          <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-6 shadow-[4px_4px_0px_#1A1A1A] flex flex-col gap-6 flex-1">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <FileImage className="w-4 h-4 text-[#7C5CFC]" /> Upload Halaman Gambar Chapter
+                <h3 className="text-sm font-black text-[#1A1A1A] flex items-center gap-2">
+                  <FileImage className="w-4 h-4 text-[#2E7D6E]" /> Upload Halaman Gambar Chapter
                 </h3>
-                <p className="text-xs text-[#9AA0AC] mt-0.5">
-                  Pilih beberapa gambar halaman chapter sekaligus. Gambar akan diurutkan berdasarkan nama file secara otomatis.
+                <p className="text-xs text-[#7A756D] font-medium mt-0.5">
+                  Pilih beberapa gambar halaman chapter sekaligus. Gambar otomatis diurutkan berdasarkan nama file.
                 </p>
               </div>
               {pageFiles.length > 0 && (
                 <button
                   type="button"
                   onClick={handleClearPages}
-                  className="px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold flex items-center gap-1.5 transition-colors border border-red-500/20"
+                  className="px-3.5 py-1.5 rounded-full bg-[#FFEAEA] hover:bg-[#FFD6D6] text-[#C53030] text-xs font-black flex items-center gap-1.5 transition-colors border-2 border-[#1A1A1A] shadow-sm"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Hapus Semua
                 </button>
@@ -484,17 +523,17 @@ export default function AdminUploadPage() {
             </div>
 
             {/* Dropzone Area */}
-            <label className="cursor-pointer bg-[#0F1115] hover:bg-[#151821] border-2 border-dashed border-[#2A2F3A] hover:border-[#7C5CFC] rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-all group">
-              <div className="p-4 rounded-2xl bg-[#171A21] border border-[#2A2F3A] text-[#7C5CFC] group-hover:scale-110 transition-transform mb-3">
-                <Upload className="w-8 h-8" />
+            <label className="cursor-pointer bg-[#FAF7F0] hover:bg-[#FAF7F0]/70 border-2 border-dashed border-[#1A1A1A] rounded-3xl p-8 flex flex-col items-center justify-center text-center transition-all group">
+              <div className="w-14 h-14 rounded-2xl bg-[#F6C945] border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] flex items-center justify-center group-hover:scale-110 transition-transform mb-3">
+                <Upload className="w-7 h-7 text-[#1A1A1A] stroke-[2.5]" />
               </div>
-              <span className="text-sm font-bold text-white mb-1">
-                Pilih atau Drag & Drop Gambar Halaman Chapter
+              <span className="text-sm font-black text-[#1A1A1A] mb-1">
+                Pilih atau Drag &amp; Drop Gambar Halaman Chapter
               </span>
-              <span className="text-xs text-[#9AA0AC] mb-4">
-                Dukungan format `.png`, `.jpg`, `.jpeg`, `.webp` (Multi-select diizinkan)
+              <span className="text-xs text-[#7A756D] font-bold mb-4">
+                Dukungan format .png, .jpg, .jpeg, .webp (Multi-select)
               </span>
-              <span className="px-4 py-2 rounded-xl bg-[#7C5CFC] hover:bg-[#6846F9] text-xs font-bold text-white shadow-lg shadow-purple-500/20 transition-all">
+              <span className="px-5 py-2 rounded-full bg-[#2E7D6E] hover:bg-[#256659] text-xs font-black text-white border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] transition-all">
                 Pilih File Gambar
               </span>
               <input
@@ -509,38 +548,38 @@ export default function AdminUploadPage() {
             {/* Selected Page Files Grid */}
             {pageFiles.length > 0 && (
               <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between text-xs font-semibold text-[#9AA0AC] border-b border-[#2A2F3A] pb-3">
+                <div className="flex items-center justify-between text-xs font-black text-[#1A1A1A] border-b-2 border-[#1A1A1A]/10 pb-3">
                   <span>Daftar Halaman ({pageFiles.length} Gambar)</span>
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <Zap className="w-3 h-3" /> Auto WebP Compression Active
+                  <span className="text-[#137333] flex items-center gap-1">
+                    <Zap className="w-3.5 h-3.5 fill-current" /> Auto WebP Active
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-h-[420px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[420px] overflow-y-auto pr-1">
                   {pagePreviews.map((src, idx) => (
                     <div
                       key={idx}
-                      className="group relative bg-[#0F1115] border border-[#2A2F3A] rounded-xl overflow-hidden flex flex-col"
+                      className="group relative bg-[#FAF7F0] border-2 border-[#1A1A1A] rounded-2xl overflow-hidden shadow-sm flex flex-col"
                     >
-                      <div className="relative aspect-[3/4] w-full overflow-hidden bg-black/40">
+                      <div className="relative aspect-[3/4] w-full overflow-hidden bg-[#FAF7F0]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={src}
                           alt={`Page ${idx + 1}`}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
-                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/70 text-[10px] font-bold text-white backdrop-blur-md">
+                        <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-[#1A1A1A] text-[10px] font-black text-white border border-white">
                           Hal. {idx + 1}
                         </div>
                         <button
                           type="button"
                           onClick={() => handleRemovePage(idx)}
-                          className="absolute top-2 right-2 p-1.5 rounded-md bg-red-500/80 hover:bg-red-600 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="absolute top-2 right-2 p-1.5 rounded-full bg-[#FFEAEA] border border-[#1A1A1A] text-[#C53030] opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <div className="p-2 text-[10px] text-[#9AA0AC] truncate bg-[#171A21]">
+                      <div className="p-2 text-[10px] font-bold text-[#7A756D] truncate bg-white border-t border-[#1A1A1A]/20">
                         {pageFiles[idx]?.name}
                       </div>
                     </div>
@@ -549,26 +588,26 @@ export default function AdminUploadPage() {
               </div>
             )}
 
-            {/* Submit Button & Progress Indicator */}
-            <div className="pt-4 border-t border-[#2A2F3A] flex items-center justify-end gap-4">
+            {/* Submit Button */}
+            <div className="pt-4 border-t-2 border-[#1A1A1A]/10 flex items-center justify-end gap-4">
               <button
                 type="submit"
                 disabled={isSubmitting || pageFiles.length === 0}
-                className={`w-full sm:w-auto px-6 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-lg ${
+                className={`w-full sm:w-auto px-7 py-3 rounded-full text-xs font-black flex items-center justify-center gap-2 transition-all border-2 border-[#1A1A1A] ${
                   isSubmitting || pageFiles.length === 0
-                    ? 'bg-[#2A2F3A] text-[#5A606E] cursor-not-allowed'
-                    : 'bg-[#7C5CFC] hover:bg-[#6846F9] text-white shadow-purple-500/20'
+                    ? 'bg-[#FAF7F0] text-[#B3ADA0] border-[#1A1A1A]/30 cursor-not-allowed'
+                    : 'bg-[#F6C945] hover:bg-[#EDB72B] text-[#1A1A1A] shadow-[3px_3px_0px_#1A1A1A] active:translate-x-[2px] active:translate-y-[2px]'
                 }`}
               >
                 {isSubmitting ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Mengonversi & Mengunggah WebP...
+                    <Loader2 className="w-4 h-4 animate-spin text-[#1A1A1A]" />
+                    Mengonversi &amp; Mengunggah WebP...
                   </>
                 ) : (
                   <>
                     <Zap className="w-4 h-4 fill-current" />
-                    Proses & Simpan Komik (Auto-WebP)
+                    Proses &amp; Simpan Komik (Auto-WebP)
                   </>
                 )}
               </button>

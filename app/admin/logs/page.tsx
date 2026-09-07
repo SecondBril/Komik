@@ -10,20 +10,20 @@ export default function AdminLogsPage() {
     switch (level) {
       case 'error':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30 uppercase">
-            <AlertCircle className="w-3 h-3" /> Error
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-[#FFEAEA] text-[#C53030] border-2 border-[#1A1A1A] uppercase tracking-wider">
+            <AlertCircle className="w-3.5 h-3.5" /> Error
           </span>
         );
       case 'warning':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase">
-            <AlertTriangle className="w-3 h-3" /> Warning
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-[#FFF8E1] text-[#B78103] border-2 border-[#1A1A1A] uppercase tracking-wider">
+            <AlertTriangle className="w-3.5 h-3.5" /> Warning
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30 uppercase">
-            <Info className="w-3 h-3" /> Info
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-[#EBF3FE] text-[#2A4FCB] border-2 border-[#1A1A1A] uppercase tracking-wider">
+            <Info className="w-3.5 h-3.5" /> Info
           </span>
         );
     }
@@ -31,26 +31,41 @@ export default function AdminLogsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-2 border-b border-[#2A2F3A] pb-4">
-        <FileText className="w-5 h-5 text-[#7C5CFC]" />
-        <h2 className="text-lg font-bold text-[#F2F3F5]">Log Ingest & Error Pipeline</h2>
+      {/* Top Banner */}
+      <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-[4px_4px_0px_#1A1A1A] flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-[#2E7D6E] text-white border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] flex items-center justify-center shrink-0">
+            <FileText className="w-6 h-6 stroke-[2.5]" />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-xl font-black text-[#1A1A1A] tracking-tight">
+              Log Ingest &amp; Error Pipeline
+            </h2>
+            <p className="text-xs text-[#7A756D] font-medium mt-0.5">
+              Riwayat aktivitas background worker, scraper engine, dan status kegagalan ingest.
+            </p>
+          </div>
+        </div>
       </div>
 
-      <div className="w-full overflow-x-auto rounded-xl border border-[#2A2F3A] bg-[#171A21]">
-        <table className="w-full text-left text-xs text-[#9AA0AC]">
-          <thead className="bg-[#1F232C] text-[#F2F3F5] uppercase font-bold border-b border-[#2A2F3A]">
+      {/* Logs Table */}
+      <div className="w-full overflow-x-auto rounded-2xl sm:rounded-3xl border-2 border-[#1A1A1A] bg-white shadow-[4px_4px_0px_#1A1A1A] overflow-hidden">
+        <table className="w-full text-left text-xs font-bold text-[#1A1A1A] border-collapse">
+          <thead className="bg-[#FAF7F0] text-[#1A1A1A] uppercase font-black tracking-wider text-[11px] border-b-2 border-[#1A1A1A]">
             <tr>
-              <th className="p-3.5">Level</th>
-              <th className="p-3.5">Waktu</th>
-              <th className="p-3.5">Pesan Detail Log</th>
+              <th className="py-3.5 px-4 sm:px-6">Status Level</th>
+              <th className="py-3.5 px-4 sm:px-6">Waktu Kejadian</th>
+              <th className="py-3.5 px-4 sm:px-6">Detail Pesan Log</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#2A2F3A]">
+          <tbody className="divide-y-2 divide-[#1A1A1A]/10">
             {MOCK_INGEST_LOGS.map((log) => (
-              <tr key={log.id} className="hover:bg-[#1F232C]/50 transition-colors">
-                <td className="p-3.5">{getLevelBadge(log.level)}</td>
-                <td className="p-3.5 whitespace-nowrap">{formatRelativeTime(log.created_at)}</td>
-                <td className="p-3.5 font-mono text-[11px] text-[#F2F3F5]">{log.message}</td>
+              <tr key={log.id} className="hover:bg-[#FAF7F0]/60 transition-colors">
+                <td className="py-3.5 px-4 sm:px-6">{getLevelBadge(log.level)}</td>
+                <td className="py-3.5 px-4 sm:px-6 whitespace-nowrap text-[#7A756D] font-mono text-[11px]">
+                  {formatRelativeTime(log.created_at)}
+                </td>
+                <td className="py-3.5 px-4 sm:px-6 font-mono text-xs text-[#1A1A1A]">{log.message}</td>
               </tr>
             ))}
           </tbody>
