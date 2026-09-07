@@ -67,22 +67,49 @@ async function runImageWorker() {
   }
 
   try {
-    // 1. Fetch pending or processing chapters from queue
-    const { data: pendingChapters, error } = await supabase
+    // Batch size: process up to BATCH_SIZE chapters per run (default: 50, or all if 0)
+    // Set IMAGE_WORKER_BATCH_SIZE=0 to process all pending chapters
+    const batchSize = parseInt(process.env.IMAGE_WORKER_BATCH_SIZE || '50', 10);
+
+    // Safety: stop processing if we've been running for more than MAX_RUNTIME_MS
+    // GitHub Actions jobs timeout at 6h; we stop at 5.5h to leave time for cleanup
+    const maxRuntimeMs = parseInt(process.env.IMAGE_WORKER_MAX_RUNTIME_MS || '19800000', 10); // 5.5 hours
+    const startTime = Date.now();
+
+    // 1. Fetch pending/processing chapters from queue
+    let query = supabase
       .from('chapters')
       .select('*, comic:comics(*)')
       .in('status', ['pending', 'processing'])
-      .limit(5);
+      .order('chapter_number', { ascending: true }); // process oldest chapters first
+
+    if (batchSize > 0) {
+      query = query.limit(batchSize);
+    }
+
+    const { data: pendingChapters, error } = await query;
 
     if (error || !pendingChapters || pendingChapters.length === 0) {
       console.log('[Image Worker] No pending chapter jobs in queue.');
       return;
     }
 
+    console.log(`[Image Worker] Found ${pendingChapters.length} chapter(s) in queue to process.`);
+
+
     const limit = pLimit(3); // Concurrency limit 3 parallel downloads/conversions for network stability
 
+    let processedCount = 0;
     for (const chapter of pendingChapters) {
-      console.log(`[Image Worker] Processing Chapter ${chapter.chapter_number} (ID: ${chapter.id})...`);
+      // Safety: stop if we are approaching the max runtime
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= maxRuntimeMs) {
+        console.warn(`[Image Worker] Max runtime (${Math.round(maxRuntimeMs / 60000)}m) reached. Stopping early. Processed ${processedCount}/${pendingChapters.length} chapters this run.`);
+        break;
+      }
+
+      console.log(`[Image Worker] Processing Chapter ${chapter.chapter_number} (ID: ${chapter.id})... [${processedCount + 1}/${pendingChapters.length}]`);
+
 
       // Update chapter status to 'processing'
       await supabase.from('chapters').update({ status: 'processing' }).eq('id', chapter.id);
@@ -195,9 +222,13 @@ async function runImageWorker() {
           .eq('id', chapter.id);
         console.log(`[Image Worker] Chapter ${chapter.id} successfully processed and marked as 'published'!`);
       }
+
+      processedCount++;
     }
 
-    console.log('[Image Worker] Processing completed.');
+    const remaining = pendingChapters.length - processedCount;
+    console.log(`[Image Worker] Processing completed. Processed: ${processedCount} chapter(s).${remaining > 0 ? ` ${remaining} chapter(s) remain in queue (will be processed on next run).` : ' Queue cleared!'}`);
+
   } catch (err) {
     console.error('[Image Worker] Error running image worker:', err);
     if (process.env.CI || process.env.GITHUB_ACTIONS) {

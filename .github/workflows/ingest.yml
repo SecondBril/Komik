@@ -11,6 +11,7 @@ on:
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    timeout-minutes: 350  # 5h 50m — safely under GitHub Actions 6h limit
 
     steps:
       - name: Checkout Repository
@@ -52,4 +53,8 @@ jobs:
           IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
           IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
           R2_PUBLIC_CDN_URL: ${{ secrets.R2_PUBLIC_CDN_URL }}
-
+          # Process all pending chapters per run (no artificial cap)
+          # Set to a number (e.g. 20) to limit chapters processed per run
+          IMAGE_WORKER_BATCH_SIZE: "0"
+          # Stop image worker 20 min before the job timeout (350m - 20m = 330m = 19800s)
+          IMAGE_WORKER_MAX_RUNTIME_MS: "19800000"
