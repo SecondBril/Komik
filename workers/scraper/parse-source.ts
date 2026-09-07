@@ -3,6 +3,7 @@ import fetch from 'node-fetch';
 import https from 'https';
 import puppeteer, { Browser } from 'puppeteer-core';
 import fs from 'fs';
+import { execSync } from 'child_process';
 
 export interface ScrapedChapterData {
   comicTitle: string;
@@ -39,11 +40,29 @@ const httpsAgent = new https.Agent({
 });
 
 export function getChromeExecutablePath(): string | null {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
   if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) {
     return process.env.CHROME_BIN;
   }
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  // Dynamic CLI resolution (PATH) on Linux/macOS runners
+  if (process.platform !== 'win32') {
+    try {
+      const whichChrome = execSync(
+        'which google-chrome || which google-chrome-stable || which chromium || which chromium-browser || which chrome',
+        {
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'ignore'],
+        }
+      ).trim();
+      if (whichChrome && fs.existsSync(whichChrome)) {
+        return whichChrome;
+      }
+    } catch {
+      // Ignore fallback error
+    }
   }
 
   const possiblePaths = [
@@ -54,6 +73,9 @@ export function getChromeExecutablePath(): string | null {
     '/usr/bin/google-chrome-stable',
     '/usr/bin/chromium-browser',
     '/usr/bin/chromium',
+    '/snap/bin/chromium',
+    '/usr/local/bin/chrome',
+    '/usr/local/bin/google-chrome',
   ];
   for (const p of possiblePaths) {
     if (p && fs.existsSync(p)) {
@@ -77,6 +99,8 @@ export async function getSharedPuppeteerBrowser(): Promise<Browser | null> {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
         '--disable-blink-features=AutomationControlled',
         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       ],

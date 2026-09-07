@@ -56,6 +56,12 @@ async function runImageWorker() {
   const supabase = getWorkerSupabaseClient();
 
   if (!supabase) {
+    if (process.env.CI || process.env.GITHUB_ACTIONS) {
+      console.error(
+        '[Image Worker] ERROR: Missing Supabase credentials! Please ensure SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are set in GitHub Secrets.'
+      );
+      process.exit(1);
+    }
     console.log('[Image Worker] Simulation completed (No DB connection provided).');
     return;
   }
@@ -194,7 +200,15 @@ async function runImageWorker() {
     console.log('[Image Worker] Processing completed.');
   } catch (err) {
     console.error('[Image Worker] Error running image worker:', err);
+    if (process.env.CI || process.env.GITHUB_ACTIONS) {
+      process.exit(1);
+    }
   }
 }
 
-runImageWorker();
+runImageWorker().catch((err) => {
+  console.error('[Image Worker] Fatal error:', err);
+  if (process.env.CI || process.env.GITHUB_ACTIONS) {
+    process.exit(1);
+  }
+});

@@ -10,13 +10,24 @@ async function runScraperWorker() {
   const supabase = getWorkerSupabaseClient();
 
   if (!supabase) {
+    if (process.env.CI || process.env.GITHUB_ACTIONS) {
+      console.error(
+        '[Scraper Worker] ERROR: Missing Supabase credentials! Please ensure SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are set in GitHub Secrets.'
+      );
+      process.exit(1);
+    }
     console.log('[Scraper Worker] Simulation completed (No DB connection provided).');
     return;
   }
 
   const browser = await getSharedPuppeteerBrowser();
   if (!browser) {
-    console.error('[Scraper Worker] Failed to start Chrome Puppeteer engine. Exiting.');
+    console.error(
+      '[Scraper Worker] ERROR: Failed to start Chrome Puppeteer engine! Check that Chrome is installed or PUPPETEER_EXECUTABLE_PATH is provided.'
+    );
+    if (process.env.CI || process.env.GITHUB_ACTIONS) {
+      process.exit(1);
+    }
     return;
   }
 
@@ -169,9 +180,23 @@ async function runScraperWorker() {
     console.log('\n[Scraper Worker] Ingestion run completed successfully.');
   } catch (err) {
     console.error('[Scraper Worker] Error executing scraper worker:', err);
+    if (process.env.CI || process.env.GITHUB_ACTIONS) {
+      process.exit(1);
+    }
   } finally {
-    await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        // Ignore close error
+      }
+    }
   }
 }
 
-runScraperWorker();
+runScraperWorker().catch((err) => {
+  console.error('[Scraper Worker] Fatal error:', err);
+  if (process.env.CI || process.env.GITHUB_ACTIONS) {
+    process.exit(1);
+  }
+});
