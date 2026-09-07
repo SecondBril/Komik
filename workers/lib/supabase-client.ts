@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
+import WebSocket from 'ws';
 
 // Load environment variables from root .env.local and .env
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -17,5 +18,13 @@ export function getWorkerSupabaseClient() {
     return null;
   }
 
-  return createClient(supabaseUrl, supabaseServiceKey);
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    realtime: {
+      transport: WebSocket as any,
+    },
+  });
 }
