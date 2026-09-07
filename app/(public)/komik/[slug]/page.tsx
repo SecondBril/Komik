@@ -94,7 +94,7 @@ export default function ComicDetailPage() {
 
       {/* Main Responsive Container */}
       <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 flex flex-col gap-6 z-10">
-        
+
         {/* 1. Curved Teal Header Bar */}
         <div className="relative w-full bg-[#2E7D6E] py-4 px-5 sm:px-8 rounded-3xl sm:rounded-[36px] border-[3px] border-[#1A1A1A] shadow-[4px_4px_0px_#1A1A1A] flex items-center justify-between gap-4">
           <Link
@@ -121,7 +121,7 @@ export default function ComicDetailPage() {
 
         {/* 2. Main Comic Card with min-w-0 and w-full to guarantee NO overflow */}
         <div className="w-full bg-white rounded-[32px] sm:rounded-[40px] border-[3px] border-[#1A1A1A] shadow-[6px_6px_0px_#1A1A1A] p-5 sm:p-8 flex flex-col md:flex-row items-start gap-6 sm:gap-8 overflow-hidden box-border">
-          
+
           {/* Left Column: Comic Cover Poster */}
           <div className="mx-auto md:mx-0 shrink-0 flex flex-col items-center gap-3 w-full md:w-auto">
             <div className="relative w-48 sm:w-56 md:w-64 aspect-[2/3] rounded-[24px] overflow-hidden bg-[#FAF7F0] p-2 border-[3px] border-[#1A1A1A] shadow-[4px_4px_0px_#1A1A1A]">
@@ -162,7 +162,7 @@ export default function ComicDetailPage() {
 
           {/* Right Column: min-w-0 ensures flex child never exceeds parent card width */}
           <div className="flex-1 min-w-0 w-full flex flex-col gap-4 overflow-hidden">
-            
+
             {/* Title & Badges */}
             <div className="flex flex-col gap-2">
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-[#1A1A1A] tracking-tight leading-snug break-words">
@@ -171,7 +171,6 @@ export default function ComicDetailPage() {
 
               {/* Badges Row */}
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                <PriceBadge price="$3.50" />
                 <div className="flex items-center gap-1 px-3 py-1 rounded-full bg-[#FAF7F0] border-2 border-[#1A1A1A] shadow-sm text-xs font-black text-[#1A1A1A]">
                   <Star className="w-3.5 h-3.5 fill-[#F6C945] stroke-[#1A1A1A]" />
                   <span>{comic.rating.toFixed(2)}</span>
@@ -255,7 +254,7 @@ export default function ComicDetailPage() {
 
         {/* 3. Complete Chapter List with Search Chapter Input */}
         <div className="w-full bg-white rounded-[32px] sm:rounded-[40px] border-[3px] border-[#1A1A1A] shadow-[6px_6px_0px_#1A1A1A] p-5 sm:p-8 flex flex-col gap-4 overflow-hidden box-border">
-          
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b-2 border-[#1A1A1A]">
             <div>
               <h2 className="text-lg sm:text-xl font-black text-[#1A1A1A] tracking-tight">
@@ -306,9 +305,8 @@ export default function ComicDetailPage() {
                   <Link
                     key={ch.id}
                     href={`/komik/${comic.slug}/${ch.chapter_number}`}
-                    className={`flex items-center justify-between p-3.5 rounded-2xl border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] transition-all hover:bg-[#F6C945]/15 active:translate-x-[1px] active:translate-y-[1px] ${
-                      isRead ? 'bg-[#FAF7F0]' : 'bg-white'
-                    }`}
+                    className={`flex items-center justify-between p-3.5 rounded-2xl border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] transition-all hover:bg-[#F6C945]/15 active:translate-x-[1px] active:translate-y-[1px] ${isRead ? 'bg-[#FAF7F0]' : 'bg-white'
+                      }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-9 h-9 rounded-full bg-[#F6C945] border-2 border-[#1A1A1A] flex items-center justify-center font-black text-xs text-[#1A1A1A] shadow-sm shrink-0">
