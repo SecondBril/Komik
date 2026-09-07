@@ -15,6 +15,8 @@ import {
   LogOut,
   Loader2,
   Lock,
+  Menu,
+  X,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -25,6 +27,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     async function checkAdminAuth() {
@@ -35,17 +38,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         const { data: { user } } = await supabase.auth.getUser();
         if (user && user.email) {
           setUserEmail(user.email);
-          if (user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-            setIsAuthorized(true);
-          } else {
-            setIsAuthorized(false);
-          }
+          setIsAuthorized(user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
         } else {
           setUserEmail(null);
           setIsAuthorized(false);
         }
       } else {
-        // Fallback for simulation mode without Supabase env
         setUserEmail(ADMIN_EMAIL);
         setIsAuthorized(true);
       }
@@ -54,7 +52,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     checkAdminAuth();
 
-    // Listen to Auth State changes (e.g. login / logout)
     const supabase = createClient();
     if (supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
@@ -76,31 +73,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (supabase) {
       await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/api/auth/callback`,
-        },
+        options: { redirectTo: `${window.location.origin}/api/auth/callback` },
       });
     }
   };
 
   const handleLogout = async () => {
     const supabase = createClient();
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
+    if (supabase) await supabase.auth.signOut();
     setUserEmail(null);
     setIsAuthorized(false);
   };
 
   const tabs = [
-    { name: 'Queue Status', href: '/admin', icon: ListOrdered },
-    { name: 'Kelola Komik', href: '/admin/comics', icon: BookOpen },
-    { name: 'Input Komik Manual', href: '/admin/upload', icon: Upload },
-    { name: 'Sumber Scraping', href: '/admin/sources', icon: Globe },
-    { name: 'Log Error Ingest', href: '/admin/logs', icon: FileText },
+    { name: 'Queue', href: '/admin', icon: ListOrdered },
+    { name: 'Komik', href: '/admin/comics', icon: BookOpen },
+    { name: 'Upload', href: '/admin/upload', icon: Upload },
+    { name: 'Sumber', href: '/admin/sources', icon: Globe },
+    { name: 'Log', href: '/admin/logs', icon: FileText },
   ];
 
-  // Loading State
   if (isCheckingAuth) {
     return (
       <div className="min-h-screen bg-[#0F1115] text-[#F2F3F5] flex flex-col items-center justify-center gap-3">
@@ -110,19 +102,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  // Access Denied Screen for non-admin or unauthenticated users
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-[#0F1115] text-[#F2F3F5] flex flex-col items-center justify-center p-4">
         <div className="bg-[#171A21] border border-[#2A2F3A] rounded-2xl p-8 max-w-md w-full flex flex-col items-center text-center gap-5 shadow-2xl relative overflow-hidden">
-          {/* Accent Line */}
           <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-500 via-red-500 to-purple-500" />
-
-          {/* Shield Icon */}
-          <div className="p-4 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-lg shadow-amber-500/10">
+          <div className="p-4 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
             <Lock className="w-10 h-10" />
           </div>
-
           <div>
             <h2 className="text-lg font-bold text-white mb-1.5 flex items-center justify-center gap-2">
               <ShieldAlert className="w-5 h-5 text-amber-400" />
@@ -135,8 +122,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <code className="text-xs font-bold text-amber-400 font-mono">{ADMIN_EMAIL}</code>
             </div>
           </div>
-
-          {/* Current Auth Status Notice */}
           {userEmail ? (
             <div className="w-full p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
               Anda saat ini masuk sebagai: <strong>{userEmail}</strong> (Bukan Pengelola Admin).
@@ -146,8 +131,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               Anda belum masuk ke akun Google.
             </div>
           )}
-
-          {/* Actions */}
           <div className="flex flex-col w-full gap-2.5 pt-2">
             {userEmail ? (
               <button
@@ -156,7 +139,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 className="w-full py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition-all flex items-center justify-center gap-2"
               >
                 <LogOut className="w-4 h-4" />
-                Keluar & Ganti Akun Admin
+                Keluar &amp; Ganti Akun Admin
               </button>
             ) : (
               <button
@@ -168,7 +151,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 Masuk dengan Google (Akun Admin)
               </button>
             )}
-
             <Link
               href="/"
               className="w-full py-2.5 rounded-xl bg-[#1F232C] hover:bg-[#2A2F3A] text-xs font-semibold text-[#9AA0AC] hover:text-white transition-colors flex items-center justify-center gap-2 border border-[#2A2F3A]"
@@ -182,49 +164,82 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  // Authorized Admin View
   return (
     <div className="min-h-screen bg-[#0F1115] text-[#F2F3F5] flex flex-col">
-      {/* Admin Top Header */}
-      <header className="bg-[#171A21] border-b border-[#2A2F3A] px-6 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
-            <Shield className="w-5 h-5" />
+      {/* Admin Top Header — Mobile Responsive */}
+      <header className="bg-[#171A21] border-b border-[#2A2F3A] px-4 md:px-6 h-14 md:h-16 flex items-center justify-between gap-3 sticky top-0 z-40">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 md:p-2 rounded-xl bg-amber-500/10 text-amber-400 shrink-0">
+            <Shield className="w-4 h-4 md:w-5 md:h-5" />
           </div>
-          <div>
-            <h1 className="text-sm font-bold flex items-center gap-2">
+          <div className="hidden sm:block">
+            <h1 className="text-xs md:text-sm font-bold">
               Internal Admin Dashboard
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                {ADMIN_EMAIL}
-              </span>
             </h1>
-            <p className="text-[11px] text-[#9AA0AC]">Monitoring Ingest Pipeline & Management</p>
+            <p className="text-[10px] text-[#9AA0AC] hidden md:block">Monitoring Ingest Pipeline &amp; Management</p>
           </div>
+          <span className="sm:hidden text-sm font-bold">Admin</span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {/* Desktop actions */}
+          <div className="hidden md:flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              {ADMIN_EMAIL}
+            </span>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold transition-colors border border-red-500/20"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Keluar
+            </button>
+            <Link
+              href="/"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1F232C] hover:bg-[#2A2F3A] text-xs font-medium text-[#9AA0AC] hover:text-white transition-colors border border-[#2A2F3A]"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Situs
+            </Link>
+          </div>
+
+          {/* Mobile hamburger */}
           <button
             type="button"
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold transition-colors border border-red-500/20"
-            title="Keluar dari akun admin"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            className="md:hidden p-2 rounded-lg bg-[#1F232C] border border-[#2A2F3A] text-[#9AA0AC]"
           >
-            <LogOut className="w-3.5 h-3.5" />
+            {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile Dropdown Menu */}
+      {mobileMenuOpen && (
+        <div className="md:hidden bg-[#171A21] border-b border-[#2A2F3A] px-4 py-3 flex flex-col gap-2 z-30">
+          <div className="text-[10px] text-[#9AA0AC] px-1">Masuk sebagai: <span className="text-amber-400 font-mono">{ADMIN_EMAIL}</span></div>
+          <button
+            type="button"
+            onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 text-red-400 text-xs font-semibold border border-red-500/20"
+          >
+            <LogOut className="w-4 h-4" />
             Keluar Admin
           </button>
-
           <Link
             href="/"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1F232C] hover:bg-[#2A2F3A] text-xs font-medium text-[#9AA0AC] hover:text-white transition-colors border border-[#2A2F3A]"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1F232C] text-xs text-[#9AA0AC] border border-[#2A2F3A]"
           >
             <ArrowLeft className="w-4 h-4" />
             Kembali ke Situs
           </Link>
         </div>
-      </header>
+      )}
 
-      {/* Admin Tabs */}
-      <div className="bg-[#171A21] border-b border-[#2A2F3A] px-6 flex gap-2">
+      {/* Admin Tabs — horizontal scroll on mobile */}
+      <div className="bg-[#171A21] border-b border-[#2A2F3A] px-2 md:px-6 flex gap-0 overflow-x-auto scrollbar-none sticky top-14 md:top-16 z-30">
         {tabs.map((tab) => {
           const isActive = pathname === tab.href;
           const Icon = tab.icon;
@@ -232,21 +247,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <Link
               key={tab.href}
               href={tab.href}
-              className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition-all ${
+              className={`flex items-center gap-1.5 px-3 md:px-4 py-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
                 isActive
                   ? 'border-[#7C5CFC] text-[#7C5CFC] bg-[#7C5CFC]/10'
                   : 'border-transparent text-[#9AA0AC] hover:text-white'
               }`}
             >
-              <Icon className="w-4 h-4" />
-              {tab.name}
+              <Icon className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">{tab.name}</span>
             </Link>
           );
         })}
       </div>
 
       {/* Main Admin Content Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-4 md:gap-6">
         {children}
       </main>
     </div>
