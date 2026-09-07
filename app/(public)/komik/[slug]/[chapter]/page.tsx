@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getComicBySlug } from '@/lib/queries/comics';
-import { getComicChapters, getChapterPages, getChapterByNumber } from '@/lib/queries/chapters';
 import { saveReadingHistory } from '@/lib/queries/history';
 import { Comic, Chapter, ChapterPage } from '@/lib/types';
 import { ViewerScroll } from '@/components/reader/ViewerScroll';
@@ -47,34 +45,28 @@ export default function ReadingViewerPage() {
       if (!slug || isNaN(chapterNo)) return;
       setLoading(true);
 
-      const comicData = await getComicBySlug(slug);
-      setComic(comicData);
+      try {
+        const res = await fetch(`/api/reader?slug=${encodeURIComponent(slug)}&chapter=${chapterNo}`);
+        const data = await res.json();
 
-      if (comicData) {
-        // Set default reading mode based on comic type (Manhwa -> scroll, Manga -> paged)
-        setReadMode(comicData.type === 'manhwa' ? 'scroll' : 'paged');
-      }
+        if (data.success && data.comic && data.currentChapter) {
+          setComic(data.comic);
+          setReadMode(data.comic.type === 'manhwa' ? 'scroll' : 'paged');
+          setCurrentChapter(data.currentChapter);
+          setPages(data.pages || []);
+          setAllChapters(data.allChapters || []);
 
-      const chapterList = await getComicChapters(slug);
-      setAllChapters(chapterList);
-
-      const chapterData = await getChapterByNumber(slug, chapterNo);
-      setCurrentChapter(chapterData);
-
-      if (chapterData) {
-        const pageList = await getChapterPages(chapterData.id);
-        setPages(pageList);
-
-        // Record reading history (Cloud & Local)
-        if (comicData) {
+          // Record reading history (Cloud & Local)
           saveReadingHistory({
-            comic_id: comicData.id,
-            chapter_id: chapterData.id,
+            comic_id: data.comic.id,
+            chapter_id: data.currentChapter.id,
           });
         }
+      } catch (err) {
+        console.error('[Reader] Failed to load chapter data:', err);
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     }
 
     loadData();

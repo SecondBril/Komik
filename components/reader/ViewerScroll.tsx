@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChapterPage } from '@/lib/types';
 
 interface ViewerScrollProps {
@@ -46,23 +46,29 @@ export const ViewerScroll: React.FC<ViewerScrollProps> = ({
       ref={containerRef}
       className={`w-full ${widthClass} mx-auto flex flex-col items-center bg-[#0B0C0F] min-h-screen py-2 transition-all duration-300`}
     >
-      {pages.map((page, index) => (
-        <div
-          key={page.id || page.page_number}
-          className="w-full relative flex justify-center bg-[#0B0C0F]"
-        >
-          <img
-            src={page.image_url}
-            alt={`${comicTitle} - Chapter ${chapterNumber} - Halaman ${page.page_number}`}
-            loading={index < 3 ? 'eager' : 'lazy'}
-            onError={(e: any) => {
-              e.currentTarget.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1000&auto=format&fit=crop&q=80';
-            }}
-            className="w-full h-auto block object-contain select-none transition-opacity duration-200"
-          />
-        </div>
-      ))}
+      {pages.map((page, index) => {
+        const isPriority = index < 2;
+
+        return (
+          <div
+            key={page.id || page.page_number}
+            className="w-full relative flex justify-center bg-[#0B0C0F] min-h-[300px] sm:min-h-[500px]"
+          >
+            <img
+              src={page.image_url}
+              alt={`${comicTitle} - Chapter ${chapterNumber} - Halaman ${page.page_number}`}
+              loading={isPriority ? 'eager' : 'lazy'}
+              decoding="async"
+              // @ts-ignore fetchpriority attribute for modern browsers
+              fetchpriority={isPriority ? 'high' : 'auto'}
+              onError={(e: any) => {
+                e.currentTarget.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1000&auto=format&fit=crop&q=80';
+              }}
+              className="w-full h-auto block object-contain select-none transition-opacity duration-200"
+            />
+          </div>
+        );
+      })}
     </div>
   );
 };
-
