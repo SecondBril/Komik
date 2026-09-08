@@ -10,6 +10,8 @@ import {
   removeGuestHistoryItem,
   removeComicHistory,
   clearGuestHistory,
+  mergeGuestHistoryToSupabase,
+  mergeHistoryArrays,
   GroupedComicHistory,
 } from '@/lib/queries/history';
 import { createClient } from '@/lib/supabase/client';
@@ -80,16 +82,23 @@ export default function HistoryPage() {
 
         if (activeSession?.user) {
           setIsLoggedIn(true);
+
+          // 1. Sync riwayat guest lokal ke Supabase cloud jika ada
+          const localCookieItems = getGuestHistory();
+          if (localCookieItems.length > 0) {
+            await mergeGuestHistoryToSupabase();
+          }
+
+          // 2. Ambil riwayat terbaru dari Supabase
           const res = await fetch('/api/history', { cache: 'no-store' });
           const json = await res.json();
-          if (json.success && Array.isArray(json.data)) {
-            const items: ReadingHistoryItem[] = json.data;
-            setHistoryItems(items);
-            buildGrouped(items);
-          } else {
-            setHistoryItems([]);
-            setGroupedComics([]);
-          }
+          const cloudItems: ReadingHistoryItem[] =
+            json.success && Array.isArray(json.data) ? json.data : [];
+
+          // 3. Gabungkan cloud items dengan cookie items agar riwayat sebelum login langsung tampil tanpa hilang
+          const combined = mergeHistoryArrays(cloudItems, localCookieItems);
+          setHistoryItems(combined);
+          buildGrouped(combined);
           return;
         }
       }
@@ -124,9 +133,8 @@ export default function HistoryPage() {
     try {
       if (isLoggedIn) {
         await fetch(`/api/history?chapterId=${item.chapter_id}`, { method: 'DELETE' });
-      } else {
-        removeGuestHistoryItem(item.id);
       }
+      removeGuestHistoryItem(item.id);
       await loadHistory();
     } finally {
       setIsDeleting(null);
@@ -139,9 +147,8 @@ export default function HistoryPage() {
     try {
       if (isLoggedIn) {
         await fetch(`/api/history?comicId=${group.comic_id}`, { method: 'DELETE' });
-      } else {
-        removeComicHistory(group.comic_id);
       }
+      removeComicHistory(group.comic_id);
       await loadHistory();
     } finally {
       setIsDeleting(null);
@@ -154,9 +161,8 @@ export default function HistoryPage() {
     try {
       if (isLoggedIn) {
         await fetch('/api/history', { method: 'DELETE' });
-      } else {
-        clearGuestHistory();
       }
+      clearGuestHistory();
       setHistoryItems([]);
       setGroupedComics([]);
     } finally {
@@ -167,6 +173,7 @@ export default function HistoryPage() {
   const handleLoginSuccess = async () => {
     setIsAuthModalOpen(false);
     setIsLoggedIn(true);
+    await mergeGuestHistoryToSupabase();
     await loadHistory();
   };
 

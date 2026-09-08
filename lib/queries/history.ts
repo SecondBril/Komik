@@ -186,6 +186,8 @@ export async function saveReadingHistory(item: SaveReadingHistoryParams): Promis
       body: JSON.stringify({
         comic_id: comicId,
         chapter_id: chapterId,
+        comic_slug: item.comic?.slug || comicObj.slug,
+        chapter_number: item.chapter?.chapter_number ?? chapterNumber,
         scroll_position: item.scroll_position || 0,
       }),
     });
@@ -319,30 +321,88 @@ export function clearGuestHistory(): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Saat user baru login, ambil cookie history dan sync semuanya ke Supabase.
- * Dipanggil dari auth callback / login success handler.
+ * Saat user baru login, ambil cookie history dan sync semuanya ke Supabase secara bulk.
+ * Dipanggil dari auth callback / login success handler / navbar session listener / history page.
  */
 export async function mergeGuestHistoryToSupabase(): Promise<void> {
   const cookieItems = getCookieHistory();
-  if (cookieItems.length === 0) return;
+  if (!cookieItems || cookieItems.length === 0) return;
 
   try {
-    const results = await Promise.allSettled(
-      cookieItems.map((item) =>
-        fetch('/api/history', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            comic_id: item.comic_id,
-            chapter_id: item.chapter_id,
-            scroll_position: item.scroll_position || 0,
-          }),
-        })
-      )
-    );
-    const successCount = results.filter((r) => r.status === 'fulfilled').length;
-    console.log(`[History] Merged ${successCount}/${cookieItems.length} guest chapters to Supabase.`);
+    const supabase = createClient();
+    if (!supabase) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    // Siapkan payload bulk
+    const payload = cookieItems.map((item) => ({
+      comic_id: item.comic_id,
+      chapter_id: item.chapter_id,
+      comic_slug: item.comic?.slug,
+      chapter_number: item.chapter?.chapter_number,
+      scroll_position: item.scroll_position || 0,
+      last_read_at: item.last_read_at || new Date().toISOString(),
+    }));
+
+    const res = await fetch('/api/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: payload }),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      console.log(`[History] Berhasil merge ${cookieItems.length} guest chapters ke Supabase cloud:`, json);
+    }
   } catch (err) {
     console.warn('[History] mergeGuestHistoryToSupabase failed:', err);
   }
+}
+
+/**
+ * Menggabungkan riwayat dari cloud (Supabase) dan lokal (Cookie).
+ * Jika ada item yang sama (chapter yang sama pada komik yang sama),
+ * ambil yang memiliki timestamp last_read_at paling baru.
+ */
+export function mergeHistoryArrays(
+  cloudItems: ReadingHistoryItem[],
+  cookieItems: ReadingHistoryItem[]
+): ReadingHistoryItem[] {
+  const map = new Map<string, ReadingHistoryItem>();
+
+  const getItemKey = (item: ReadingHistoryItem): string => {
+    if (item.chapter_id && item.chapter_id.length > 10) {
+      return item.chapter_id;
+    }
+    const comicKey = item.comic?.slug || item.comic_id || '';
+    const chNum = item.chapter?.chapter_number ?? '';
+    return `${comicKey}_ch_${chNum}`;
+  };
+
+  for (const item of cloudItems) {
+    const key = getItemKey(item);
+    map.set(key, item);
+  }
+
+  for (const item of cookieItems) {
+    const key = getItemKey(item);
+    if (!map.has(key)) {
+      map.set(key, item);
+    } else {
+      const existing = map.get(key)!;
+      const existingTime = new Date(existing.last_read_at || 0).getTime();
+      const itemTime = new Date(item.last_read_at || 0).getTime();
+      if (itemTime > existingTime) {
+        map.set(key, {
+          ...existing,
+          scroll_position: item.scroll_position ?? existing.scroll_position,
+          last_read_at: item.last_read_at,
+        });
+      }
+    }
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.last_read_at || 0).getTime() - new Date(a.last_read_at || 0).getTime()
+  );
 }

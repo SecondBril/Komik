@@ -91,27 +91,124 @@ async function runScraperWorker() {
         console.log(`[Scraper Worker] Successfully created comic "${comic.title}" (ID: ${comic.id}).`);
       }
 
-      // 3. DB-FIRST CHECK: Fetch ALL existing chapter numbers for this comic from Supabase
+      // 3. DB-FIRST CHECK: Fetch ALL existing chapter records for this comic from Supabase
       const { data: existingChapters } = await supabase
         .from('chapters')
-        .select('chapter_number')
+        .select('id, chapter_number, status, retry_count')
         .eq('comic_id', comic.id);
 
-      const existingChapterNumbers = new Set(
-        (existingChapters || []).map((ch) => ch.chapter_number)
+      const existingChapterMap = new Map<number, any>(
+        (existingChapters || []).map((ch: any) => [Number(ch.chapter_number), ch])
       );
 
       console.log(
-        `[Scraper Worker] Comic "${comic.title}" has ${existingChapterNumbers.size} existing chapters in DB. Total chapters available on site: ${comicDetail.chapters.length}.`
+        `[Scraper Worker] Comic "${comic.title}" has ${existingChapterMap.size} existing chapters in DB. Total chapters available on site: ${comicDetail.chapters.length}.`
       );
+
+      // Helper to check if a page is already successfully uploaded to Cloud Storage
+      const isAlreadyUploaded = (url: string | null | undefined) =>
+        typeof url === 'string' &&
+        (url.includes('ik.imagekit.io') || url.includes('/api/storage/onedrive')) &&
+        !url.includes('error');
 
       // 4. Iterate over ALL chapters discovered on site
       for (const chItem of comicDetail.chapters) {
-        // IDEMPOTENCY CHECK BEFORE OPENING PUPPETEER READER PAGE
-        if (existingChapterNumbers.has(chItem.chapterNumber)) {
+        const existingChapter = existingChapterMap.get(chItem.chapterNumber);
+
+        if (existingChapter) {
+          // If already published, skip (healthy chapter)
+          if (existingChapter.status === 'published') {
+            continue;
+          }
+
+          // If chapter is 'pending' or 'failed', it might have failed or missed one or more images!
           console.log(
-            `[Scraper Worker] -> Chapter ${chItem.chapterNumber} for "${comic.title}" ALREADY EXISTS in DB. SKIPPING.`
+            `[Scraper Worker] -> Chapter ${chItem.chapterNumber} is '${existingChapter.status}' in DB. Checking for missing/failed pages...`
           );
+
+          // Fetch existing pages in DB
+          const { data: existingPages } = await supabase
+            .from('chapter_pages')
+            .select('*')
+            .eq('chapter_id', existingChapter.id)
+            .order('page_number', { ascending: true });
+
+          const dbPages = existingPages || [];
+          const dbPageMap = new Map(dbPages.map((p) => [p.page_number, p]));
+          const uploadedCount = dbPages.filter((p) => isAlreadyUploaded(p.image_url)).length;
+
+          // Check if all pages are already uploaded and contiguous
+          const allDbUploaded =
+            dbPages.length >= 3 &&
+            dbPages.every((p, idx) => p.page_number === idx + 1 && isAlreadyUploaded(p.image_url));
+
+          if (allDbUploaded) {
+            console.log(
+              `[Scraper Worker] -> Chapter ${chItem.chapterNumber} already has all ${dbPages.length} pages uploaded. Marking as 'published'.`
+            );
+            await supabase.from('chapters').update({ status: 'published' }).eq('id', existingChapter.id);
+            continue;
+          }
+
+          // Chapter has missing or un-uploaded pages: scrape fresh URLs from source reader page
+          console.log(
+            `[Scraper Worker] -> Chapter ${chItem.chapterNumber} has ${uploadedCount}/${dbPages.length} uploaded pages. Re-fetching source reader to get missing images...`
+          );
+
+          const chapterData = await scrapeChapterPageWithPuppeteer(
+            browser,
+            chItem.url,
+            comicDetail.comicTitle,
+            comicDetail.comicSlug,
+            chItem.chapterNumber
+          );
+
+          if (!chapterData || chapterData.rawImageUrls.length === 0) {
+            console.warn(
+              `[Scraper Worker] Could not re-scrape images for Chapter ${chItem.chapterNumber}. Skipping.`
+            );
+            continue;
+          }
+
+          const sourceImages = chapterData.rawImageUrls;
+          let addedCount = 0;
+          let updatedCount = 0;
+
+          // Process each page in strict DOM order: index k is page k+1
+          for (let idx = 0; idx < sourceImages.length; idx++) {
+            const pageNum = idx + 1;
+            const sourceUrl = sourceImages[idx];
+            const existingPage = dbPageMap.get(pageNum);
+
+            if (!existingPage) {
+              // Page is completely missing from DB: insert it with exact matching source URL
+              await supabase.from('chapter_pages').insert({
+                chapter_id: existingChapter.id,
+                page_number: pageNum,
+                image_url: sourceUrl,
+              });
+              addedCount++;
+            } else if (!isAlreadyUploaded(existingPage.image_url)) {
+              // Page is in DB but NOT uploaded (raw or failed URL): refresh with fresh source URL
+              await supabase
+                .from('chapter_pages')
+                .update({ image_url: sourceUrl })
+                .eq('id', existingPage.id);
+              updatedCount++;
+            }
+            // If already uploaded, DO NOT touch or overwrite it!
+          }
+
+          console.log(
+            `[Scraper Worker] -> Chapter ${chItem.chapterNumber} repair synced: ${addedCount} missing pages added, ${updatedCount} un-uploaded pages refreshed.`
+          );
+
+          // Reset status to 'pending' so image worker will upload ONLY the missing/un-uploaded pages
+          await supabase
+            .from('chapters')
+            .update({ status: 'pending' })
+            .eq('id', existingChapter.id);
+
           continue;
         }
 
@@ -171,8 +268,7 @@ async function runScraperWorker() {
           console.log(
             `[Scraper Worker] Successfully added ${pagesToInsert.length} page URLs to DB queue.`
           );
-          // Mark as existing so we don't repeat in same run
-          existingChapterNumbers.add(chItem.chapterNumber);
+          existingChapterMap.set(chItem.chapterNumber, newChapter);
         }
       }
     }

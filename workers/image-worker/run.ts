@@ -125,21 +125,51 @@ async function runImageWorker() {
         continue;
       }
 
+      // Helper to check if a page image is already uploaded to Cloud Storage
+      const isAlreadyUploaded = (url: string | null | undefined): boolean => {
+        if (!url || typeof url !== 'string') return false;
+        return (
+          (url.includes('ik.imagekit.io') || url.includes('/api/storage/onedrive')) &&
+          !url.includes('error') &&
+          !url.includes('undefined')
+        );
+      };
+
+      const alreadyUploadedPages = pages.filter((p) => isAlreadyUploaded(p.image_url));
+      const unuploadedPages = pages.filter((p) => !isAlreadyUploaded(p.image_url));
+
+      console.log(
+        `[Image Worker] Chapter "${chapter.comic?.title || 'Comic'}" Ch. ${chapter.chapter_number} has ${pages.length} pages (${alreadyUploadedPages.length} already uploaded, ${unuploadedPages.length} missing/pending upload).`
+      );
+
+      // If all pages are already successfully uploaded, verify sequence and publish immediately!
+      if (unuploadedPages.length === 0) {
+        const isConsecutive = pages.every((p, idx) => p.page_number === idx + 1);
+        if (pages.length >= 3 && isConsecutive) {
+          await supabase.from('chapters').update({ status: 'published' }).eq('id', chapter.id);
+          console.log(
+            `[Image Worker] Chapter ${chapter.id} (Ch. ${chapter.chapter_number}) already has all ${pages.length} pages uploaded! Marked as 'published'.`
+          );
+          processedCount++;
+          continue;
+        }
+      }
+
       let hasError = false;
 
-      const pagePromises = pages.map((page) =>
+      // Process and upload ONLY the pages that are missing or failed
+      const pagePromises = unuploadedPages.map((page) =>
         limit(async () => {
           try {
             if (!page.image_url || typeof page.image_url !== 'string') {
               throw new Error(`Empty image URL for page ${page.page_number}`);
             }
 
-            // Case A: Page is ALREADY uploaded to Cloud Storage (OneDrive or ImageKit CDN)
-            if (page.image_url.includes('ik.imagekit.io') || page.image_url.includes('/api/storage/onedrive')) {
-              return;
-            }
+            console.log(
+              `[Image Worker] -> Uploading missing Page ${page.page_number}/${pages.length} for Chapter ${chapter.chapter_number}...`
+            );
 
-            // Case B: Page was saved locally as fallback (e.g. /comics/...)
+            // Case A: Page was saved locally as fallback (e.g. /comics/...)
             if (page.image_url.startsWith('/comics/') || page.image_url.includes('/comics/')) {
               const rawRel = page.image_url.replace(/^\//, '');
               const cleanRel = rawRel.replace(/^comics\//, '');
@@ -180,7 +210,7 @@ async function runImageWorker() {
               }
             }
 
-            // Case C: Remote HTTP image URL (standard scraping flow)
+            // Case B: Remote HTTP image URL (standard scraping flow)
             let refererHeader = 'https://v1.westmanga.my/';
             try {
               if (page.image_url.startsWith('http')) {
@@ -191,6 +221,11 @@ async function runImageWorker() {
             }
 
             const originalBuffer = await fetchRemoteImageWithRetry(page.image_url, refererHeader, 3);
+
+            // Validate that the buffer is a valid, non-empty image (magic bytes check)
+            if (!validateImageBuffer(originalBuffer)) {
+              throw new Error(`Downloaded buffer is not a valid image format for page ${page.page_number}`);
+            }
 
             // Convert to optimal format (WebP for normal pages, Progressive MozJPEG for strips > 16383px)
             const { buffer: processedBuffer, extension, contentType } = await processOptimalImage(originalBuffer, 80);
@@ -206,6 +241,10 @@ async function runImageWorker() {
               .update({ image_url: cdnUrl })
               .eq('id', page.id);
 
+            console.log(
+              `[Image Worker] -> Successfully uploaded Page ${page.page_number} for Chapter ${chapter.chapter_number}: ${cdnUrl}`
+            );
+
           } catch (err: any) {
             console.error(`[Image Worker] Failed page ${page.page_number}:`, err?.message || err);
             hasError = true;
@@ -220,20 +259,37 @@ async function runImageWorker() {
 
       await Promise.all(pagePromises);
 
-      if (hasError) {
+      // Re-verify all pages of the chapter in DB to confirm 100% completeness
+      const { data: finalPages } = await supabase
+        .from('chapter_pages')
+        .select('page_number, image_url')
+        .eq('chapter_id', chapter.id)
+        .order('page_number', { ascending: true });
+
+      const allPagesUploaded =
+        finalPages &&
+        finalPages.length >= 3 &&
+        finalPages.every((p, idx) => p.page_number === idx + 1 && isAlreadyUploaded(p.image_url));
+
+      if (allPagesUploaded && !hasError) {
+        await supabase
+          .from('chapters')
+          .update({ status: 'published' })
+          .eq('id', chapter.id);
+        console.log(
+          `[Image Worker] Chapter ${chapter.id} (Ch. ${chapter.chapter_number}) all ${finalPages.length} pages verified and published!`
+        );
+      } else {
         const nextRetry = (chapter.retry_count || 0) + 1;
         const newStatus = nextRetry >= 5 ? 'failed' : 'pending';
         await supabase
           .from('chapters')
           .update({ status: newStatus, retry_count: nextRetry })
           .eq('id', chapter.id);
-        console.warn(`[Image Worker] Chapter ${chapter.id} finished with errors. Status set to '${newStatus}'.`);
-      } else {
-        await supabase
-          .from('chapters')
-          .update({ status: 'published' })
-          .eq('id', chapter.id);
-        console.log(`[Image Worker] Chapter ${chapter.id} successfully processed and marked as 'published'!`);
+        const uploadedCount = (finalPages || []).filter((p) => isAlreadyUploaded(p.image_url)).length;
+        console.warn(
+          `[Image Worker] Chapter ${chapter.id} still incomplete (${uploadedCount}/${finalPages?.length || 0} uploaded). Status set to '${newStatus}'.`
+        );
       }
 
       processedCount++;

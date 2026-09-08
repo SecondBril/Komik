@@ -10,6 +10,7 @@ import { Toast } from '@/components/ui/Toast';
 import { ChameleonMascot } from '@/components/ui/ChameleonMascot';
 import { GoogleAuthModal } from '@/components/auth/GoogleAuthModal';
 import { createClient } from '@/lib/supabase/client';
+import { mergeGuestHistoryToSupabase } from '@/lib/queries/history';
 
 export const Navbar: React.FC = () => {
   const router = useRouter();
@@ -50,6 +51,7 @@ export const Navbar: React.FC = () => {
           email: user.email || '',
           avatar: user.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         });
+        mergeGuestHistoryToSupabase().catch(() => {});
       }
     });
 
@@ -61,6 +63,7 @@ export const Navbar: React.FC = () => {
           email: session.user.email || '',
           avatar: session.user.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         });
+        mergeGuestHistoryToSupabase().catch(() => {});
       } else if (!localUser) {
         setIsUserLoggedIn(false);
         setUserProfile(null);

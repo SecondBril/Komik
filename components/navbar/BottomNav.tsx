@@ -44,8 +44,8 @@ export const BottomNav: React.FC = () => {
     }
   }, []);
 
-  // Hide on reader page
-  if (pathname && /^\/komik\/[^\/]+\/\d+$/.test(pathname)) {
+  // Hide on reader page (e.g., /komik/slug/47, /komik/slug/1.1)
+  if (pathname && /^\/komik\/[^\/]+\/[^\/]+\/?$/.test(pathname)) {
     return null;
   }
 

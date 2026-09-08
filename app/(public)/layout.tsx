@@ -13,8 +13,8 @@ export default function PublicLayout({
 }) {
   const pathname = usePathname();
 
-  // Check if current route is a chapter reader page (e.g., /komik/slug/47)
-  const isReaderPage = pathname ? /^\/komik\/[^\/]+\/\d+$/.test(pathname) : false;
+  // Check if current route is a chapter reader page (e.g., /komik/slug/47, /komik/slug/1.1)
+  const isReaderPage = pathname ? /^\/komik\/[^\/]+\/[^\/]+\/?$/.test(pathname) : false;
 
   if (isReaderPage) {
     return (

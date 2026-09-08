@@ -329,13 +329,23 @@ export async function scrapeChapterPageWithPuppeteer(
 
     await new Promise((r) => setTimeout(r, 2500));
 
-    // Extract all DOM img elements as fallback
-    const domImages = await page.evaluate(() => {
-      const imgs = Array.from(document.querySelectorAll('img'));
-      return imgs
-        .map((img) => img.src || img.getAttribute('data-src') || img.getAttribute('data-original') || '')
+    // Extract all DOM img elements in sequential reading order
+    const domImages: string[] = await page.evaluate(() => {
+      const containerImgs = Array.from(
+        document.querySelectorAll('#readerarea img, .rdcontent img, .entry-content img, .chapter-image img')
+      );
+      const allImgs = containerImgs.length > 0 ? containerImgs : Array.from(document.querySelectorAll('img'));
+
+      return allImgs
+        .map((img: any) =>
+          img.getAttribute('data-src') ||
+          img.getAttribute('data-original') ||
+          img.getAttribute('data-lazy-src') ||
+          img.src ||
+          ''
+        )
         .filter(
-          (src) =>
+          (src: string) =>
             src &&
             src.startsWith('http') &&
             src.includes('storage.westmanga.blog/west/') &&
@@ -348,11 +358,26 @@ export async function scrapeChapterPageWithPuppeteer(
         );
     });
 
-    domImages.forEach((img) => capturedImages.add(img));
+    // Deduplicate preserving DOM sequential reading order (ensuring page 1 is index 0, page 2 is index 1, etc.)
+    const orderedImages: string[] = [];
+    const seen = new Set<string>();
 
-    const rawImageUrls = Array.from(capturedImages).filter(
-      (url) => url.includes('storage.westmanga.blog/west/') && !url.includes('cover')
-    );
+    for (const url of domImages) {
+      if (!seen.has(url)) {
+        seen.add(url);
+        orderedImages.push(url);
+      }
+    }
+
+    // Append any network-intercepted images that weren't caught in the DOM query
+    for (const url of capturedImages) {
+      if (!seen.has(url) && url.includes('storage.westmanga.blog/west/') && !url.includes('cover')) {
+        seen.add(url);
+        orderedImages.push(url);
+      }
+    }
+
+    const rawImageUrls = orderedImages;
 
     console.log(`[Puppeteer Reader Engine] Successfully extracted ${rawImageUrls.length} page images for Chapter ${chapterNumber}.`);
 
