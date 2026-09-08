@@ -1,4 +1,5 @@
 import { getWorkerSupabaseClient } from '../lib/supabase-client';
+import { getWorkerOneDriveCredentials, uploadToOneDriveWorker } from '../lib/onedrive';
 import ImageKit from 'imagekit';
 import fs from 'fs';
 import path from 'path';
@@ -59,17 +60,32 @@ async function uploadToImageKitWithRetry(
 }
 
 /**
- * Uploads a WebP image buffer to ImageKit (or saves to local /public/comics/ folder as fallback)
+ * Uploads a WebP image buffer with Dual-Storage Strategy:
+ * 1. OneDrive (Primary)
+ * 2. ImageKit (Secondary / Fallback)
+ * 3. Local Storage /public/comics/ (Safety Net)
  * Path structure: comics/{comic_slug}/{chapter_number}/{page_number}.webp
  */
 export async function uploadImageToR2(
   imageBuffer: Buffer,
   keyPath: string
 ): Promise<string> {
-  const imagekit = getImageKitClient();
   const cdnBaseUrl = (process.env.R2_PUBLIC_CDN_URL || '').replace(/\/$/, '');
 
-  // 1. Upload to ImageKit API with retry mechanism
+  // 1. Coba upload ke OneDrive (Primary)
+  const oneDriveCreds = getWorkerOneDriveCredentials();
+  if (oneDriveCreds) {
+    try {
+      const oneDriveRes = await uploadToOneDriveWorker(imageBuffer, keyPath);
+      console.log(`[OneDrive Upload Success] URL: ${oneDriveRes.url}`);
+      return oneDriveRes.url;
+    } catch (err: any) {
+      console.warn('[OneDrive Upload Warning] Penuh/Error, beralih ke ImageKit:', err?.message || err);
+    }
+  }
+
+  // 2. Upload to ImageKit API with retry mechanism (Secondary)
+  const imagekit = getImageKitClient();
   if (imagekit) {
     try {
       const fileName = keyPath.split('/').pop() || 'page.webp';

@@ -136,8 +136,8 @@ async function runImageWorker() {
 
             const keyPath = `comics/${chapter.comic.slug}/${chapter.chapter_number}/${page.page_number}.webp`;
 
-            // Case A: Page is ALREADY uploaded to ImageKit CDN
-            if (page.image_url.includes('ik.imagekit.io')) {
+            // Case A: Page is ALREADY uploaded to Cloud Storage (OneDrive or ImageKit CDN)
+            if (page.image_url.includes('ik.imagekit.io') || page.image_url.includes('/api/storage/onedrive')) {
               return;
             }
 
@@ -159,10 +159,10 @@ async function runImageWorker() {
               }
 
               if (foundLocalPath) {
-                console.log(`[Image Worker] Found local WebP file for page ${page.page_number} (${foundLocalPath}). Uploading to ImageKit...`);
+                console.log(`[Image Worker] Found local WebP file for page ${page.page_number} (${foundLocalPath}). Uploading to Storage...`);
                 const localBuffer = fs.readFileSync(foundLocalPath);
                 const cdnUrl = await uploadImageToR2(localBuffer, keyPath);
-                if (cdnUrl.startsWith('http')) {
+                if (cdnUrl.startsWith('http') || cdnUrl.startsWith('/api/storage/')) {
                   await supabase.from('chapter_pages').update({ image_url: cdnUrl }).eq('id', page.id);
                 }
                 return;

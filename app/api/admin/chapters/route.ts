@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { deleteImageKitFolder, extractImageKitFolderPath } from '@/lib/imagekit-admin';
+import { extractImageKitFolderPath } from '@/lib/imagekit-admin';
+import { deleteComicFolderFromStorages } from '@/lib/storage-manager';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -114,16 +115,28 @@ export async function DELETE(req: NextRequest) {
       .eq('chapter_id', chapterId)
       .limit(1); // Just need one URL to extract folder path
 
-    if (pages && pages.length > 0 && pages[0].image_url?.includes('ik.imagekit.io')) {
-      const folderPath = extractImageKitFolderPath(pages[0].image_url);
-      if (folderPath) {
-        // Fire-and-forget; don't block deletion on ImageKit success
-        deleteImageKitFolder(folderPath).then((result) => {
-          if (!result.success) {
-            console.warn('[ImageKit Delete Warning]', result.message);
-          } else {
-            console.log('[ImageKit Delete]', result.message);
+    if (pages && pages.length > 0 && pages[0].image_url) {
+      const imgUrl = pages[0].image_url;
+      let folderPath: string | null = null;
+
+      if (imgUrl.includes('/api/storage/onedrive')) {
+        try {
+          const urlObj = new URL(imgUrl, 'http://localhost');
+          const filePath = urlObj.searchParams.get('path');
+          if (filePath) {
+            folderPath = filePath.substring(0, filePath.lastIndexOf('/'));
           }
+        } catch (e) {
+          // ignore
+        }
+      } else if (imgUrl.includes('ik.imagekit.io')) {
+        folderPath = extractImageKitFolderPath(imgUrl);
+      }
+
+      if (folderPath) {
+        // Fire-and-forget; don't block deletion on cloud storage response
+        deleteComicFolderFromStorages(folderPath).then((result) => {
+          console.log('[Storage Delete]', result);
         });
       }
     }
