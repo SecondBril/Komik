@@ -112,7 +112,7 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
   }
 
   return (
-    <div className="w-full max-w-5xl mx-auto flex flex-col items-center justify-center min-h-[85vh] py-6 select-none">
+    <div className="w-full flex flex-col items-center justify-start min-h-screen py-4 select-none">
       {/* Neo-Comic Page Indicator Pill */}
       <div className="mb-4 px-4 py-1.5 rounded-full bg-[#F6C945] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] flex items-center gap-1.5">
         <Sparkles className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -121,9 +121,10 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
         </span>
       </div>
 
-      {/* Main Single Page Image Container */}
+        {/* Main Single Page Image Container */}
       <div
-        className="relative w-full flex justify-center items-center cursor-pointer min-h-[500px]"
+        className="relative w-full flex justify-center items-center cursor-pointer"
+        style={{ minHeight: 'calc(100vh - 160px)' }}
         onClick={handleNextPage}
       >
         {/* Loading Spinner */}
@@ -170,7 +171,10 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
             </button>
           </div>
         ) : (
-          <div className="relative rounded-2xl overflow-hidden border-[3px] border-[#1A1A1A] shadow-[6px_6px_0px_#1A1A1A] bg-white">
+          <div
+            className="relative overflow-hidden"
+            style={{ maxHeight: 'calc(100vh - 160px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
             <img
               key={`${currentPage.image_url}-${retryTimestamp || 0}`}
               src={currentImageSrc}
@@ -188,7 +192,8 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
                 setIsImageLoaded(false);
                 setIsReloading(false);
               }}
-              className={`max-h-[85vh] w-auto max-w-full h-auto object-contain transition-opacity duration-150 ${
+              style={{ maxHeight: 'calc(100vh - 160px)', width: 'auto', maxWidth: '100%' }}
+              className={`h-auto object-contain transition-opacity duration-150 ${
                 isImageLoaded ? 'opacity-100' : 'opacity-0'
               }`}
             />

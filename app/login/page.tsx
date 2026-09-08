@@ -7,6 +7,7 @@ import { ChameleonMascot } from '@/components/ui/ChameleonMascot';
 import { DecorativeBlobs } from '@/components/ui/DecorativeBlobs';
 import { ArrowRight, Eye, EyeOff, Lock, Mail, ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { mergeGuestHistoryToSupabase } from '@/lib/queries/history';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -44,6 +45,8 @@ export default function LoginPage() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        // Sync cookie history ke Supabase setelah login berhasil
+        await mergeGuestHistoryToSupabase();
         router.push('/');
       }
     } catch (err: any) {

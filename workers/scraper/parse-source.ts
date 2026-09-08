@@ -167,7 +167,7 @@ export async function getComicDetailWithPuppeteer(
 
     // Parse comic slug from URL
     const westmangaComicMatch = sourceUrl.match(/\/comic\/([^\/]+)/i);
-    const westmangaViewMatch = sourceUrl.match(/\/view\/(.*?)-chapter-(\d+(?:\.\d+)?)/i);
+    const westmangaViewMatch = sourceUrl.match(/\/view\/(.*?)-chapter-(\d+(?:[\.-]\d+)?)/i);
 
     let comicSlug = '';
     let comicTitle = '';
@@ -200,16 +200,41 @@ export async function getComicDetailWithPuppeteer(
 
     const parsedChapters: Array<{ chapterNumber: number; url: string }> = [];
 
-    // Parse chapter number for each link
+    // Parse chapter number for each link.
+    // Supports:
+    //   - Standard decimals: chapter-1.1, ch1.5
+    //   - Dash-encoded decimals: chapter-1-1 (meaning 1.1), view/title-chapter-10-5
     chapterLinks.forEach((chUrl) => {
-      const match = chUrl.match(/(?:chapter|ch\.?|-)\s*(\d+(?:\.\d+)?)/i);
+      // Strategy 1: direct decimal in URL (e.g. chapter-1.5 or ch-1.5)
+      let match = chUrl.match(/(?:chapter|ch)[\-\/\s]*(\d+\.\d+)/i);
       if (match) {
         const chapterNumber = parseFloat(match[1]);
         if (!isNaN(chapterNumber)) {
-          parsedChapters.push({
-            chapterNumber,
-            url: chUrl,
-          });
+          parsedChapters.push({ chapterNumber, url: chUrl });
+          return;
+        }
+      }
+
+      // Strategy 2: dash-encoded sub-chapter at end of URL (e.g. /chapter-10-5 meaning 10.5)
+      // Pattern: chapter-{integer}-{1-2 digit sub} at end of URL path segment
+      match = chUrl.match(/(?:chapter|ch)[\-\/](\d+)-(\d{1,2})(?:[\/?#]|$)/i);
+      if (match) {
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        // Treat as decimal only if minor part is 1-2 digits (avoid false positives)
+        const chapterNumber = parseFloat(`${major}.${minor}`);
+        if (!isNaN(chapterNumber) && minor > 0) {
+          parsedChapters.push({ chapterNumber, url: chUrl });
+          return;
+        }
+      }
+
+      // Strategy 3: plain integer chapter number
+      match = chUrl.match(/(?:chapter|ch)[\-\/\s]*(\d+)/i);
+      if (match) {
+        const chapterNumber = parseInt(match[1], 10);
+        if (!isNaN(chapterNumber)) {
+          parsedChapters.push({ chapterNumber, url: chUrl });
         }
       }
     });
