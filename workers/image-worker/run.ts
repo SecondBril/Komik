@@ -144,11 +144,19 @@ async function runImageWorker() {
             // Case B: Page was saved locally as fallback (e.g. /comics/...)
             if (page.image_url.startsWith('/comics/') || page.image_url.includes('/comics/')) {
               const rawRel = page.image_url.replace(/^\//, '');
-              const possibleLocalPaths = [
-                path.resolve(process.cwd(), '../public', rawRel),
-                path.resolve(process.cwd(), '../public/comics', rawRel.replace(/^comics\//, '')),
-                path.resolve(process.cwd(), '../public', rawRel.replace(/^comics\/comics\//, 'comics/')),
+              const cleanRel = rawRel.replace(/^comics\//, '');
+              const candidateBases = [
+                path.resolve(process.cwd(), 'public'),
+                path.resolve(process.cwd(), '../public'),
+                path.resolve(__dirname, '../../public'),
               ];
+
+              const possibleLocalPaths: string[] = [];
+              for (const base of candidateBases) {
+                possibleLocalPaths.push(path.resolve(base, rawRel));
+                possibleLocalPaths.push(path.resolve(base, 'comics', cleanRel));
+                possibleLocalPaths.push(path.resolve(base, 'comics/comics', cleanRel));
+              }
 
               let foundLocalPath: string | null = null;
               for (const p of possibleLocalPaths) {
@@ -166,6 +174,9 @@ async function runImageWorker() {
                   await supabase.from('chapter_pages').update({ image_url: cdnUrl }).eq('id', page.id);
                 }
                 return;
+              } else {
+                console.warn(`[Image Worker] Local file missing on disk for page ${page.page_number}: ${page.image_url}`);
+                throw new Error(`File lokal tidak ditemukan di folder public: ${page.image_url}`);
               }
             }
 

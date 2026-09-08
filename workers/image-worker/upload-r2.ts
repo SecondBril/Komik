@@ -124,7 +124,11 @@ export async function uploadImageToR2(
 
   // 3. Save WebP image locally to /public/comics/ directory for instant 100% working local preview
   try {
-    const localPublicDir = path.resolve(process.cwd(), '../public/comics', keyPath);
+    const basePublicDir = fs.existsSync(path.resolve(process.cwd(), 'public'))
+      ? path.resolve(process.cwd(), 'public')
+      : path.resolve(__dirname, '../../public');
+    const cleanKey = keyPath.replace(/^\/+/, '').replace(/^comics\//, '');
+    const localPublicDir = path.resolve(basePublicDir, 'comics', cleanKey);
     const targetFolder = path.dirname(localPublicDir);
 
     if (!fs.existsSync(targetFolder)) {
@@ -132,7 +136,7 @@ export async function uploadImageToR2(
     }
 
     fs.writeFileSync(localPublicDir, imageBuffer);
-    const localPublicUrl = keyPath.startsWith('/') ? keyPath : `/${keyPath}`;
+    const localPublicUrl = `/comics/${cleanKey}`;
     console.log(`[Local Saved WebP] File: ${localPublicUrl}`);
     return localPublicUrl;
   } catch (err: any) {
