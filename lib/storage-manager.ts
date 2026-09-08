@@ -107,7 +107,8 @@ async function tryUploadToImageKit(
  */
 export async function uploadComicImage(
   imageBuffer: Buffer,
-  keyPath: string
+  keyPath: string,
+  contentType?: string
 ): Promise<StorageUploadResult> {
   const cleanKey = keyPath.replace(/^\/+/, '');
   const oneDriveCreds = getOneDriveCredentials();
@@ -118,7 +119,7 @@ export async function uploadComicImage(
   if (oneDriveCreds) {
     try {
       console.log(`[Storage Manager] Mengunggah ke OneDrive (Primary): ${cleanKey}`);
-      const oneDriveRes = await uploadToOneDrive(imageBuffer, cleanKey);
+      const oneDriveRes = await uploadToOneDrive(imageBuffer, cleanKey, contentType);
       return {
         url: oneDriveRes.proxyUrl,
         provider: 'onedrive',

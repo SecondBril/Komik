@@ -8,7 +8,7 @@ import { getComicBySlug } from '@/lib/queries/comics';
 import { getComicChapters } from '@/lib/queries/chapters';
 import { Comic, Chapter } from '@/lib/types';
 import { TypeBadge, StatusBadge, PriceBadge } from '@/components/ui/Badge';
-import { getGuestHistory } from '@/lib/queries/history';
+import { getReadChapterIds, getReadChapterNumbers, getLastReadChapter } from '@/lib/queries/history';
 import { formatRelativeTime } from '@/lib/utils/relative-time';
 import {
   ArrowLeft,
@@ -32,6 +32,7 @@ export default function ComicDetailPage() {
   const [chapterSearch, setChapterSearch] = useState('');
   const [lastReadChapterNo, setLastReadChapterNo] = useState<number | null>(null);
   const [readChapterIds, setReadChapterIds] = useState<Set<string>>(new Set());
+  const [readChapterNumbers, setReadChapterNumbers] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     async function loadData() {
@@ -42,14 +43,16 @@ export default function ComicDetailPage() {
       const chapterList = await getComicChapters(slug);
       setChapters(chapterList);
 
-      // Check reading history
-      const history = getGuestHistory();
-      if (comicData) {
-        const foundHistory = history.find((h) => h.comic_id === comicData.id);
-        if (foundHistory) {
-          setLastReadChapterNo(foundHistory.chapter.chapter_number);
-          setReadChapterIds(new Set([foundHistory.chapter_id]));
-        }
+      // Check reading history (Track all read chapters)
+      const comicIdOrSlug = comicData?.id || slug;
+      const readIds = getReadChapterIds(comicIdOrSlug);
+      const readNums = getReadChapterNumbers(comicIdOrSlug);
+      setReadChapterIds(readIds);
+      setReadChapterNumbers(readNums);
+
+      const lastRead = getLastReadChapter(comicIdOrSlug);
+      if (lastRead) {
+        setLastReadChapterNo(lastRead.chapter.chapter_number);
       }
     }
     loadData();
@@ -300,7 +303,7 @@ export default function ComicDetailPage() {
               </div>
             ) : (
               filteredChapters.map((ch) => {
-                const isRead = readChapterIds.has(ch.id) || (lastReadChapterNo !== null && ch.chapter_number <= lastReadChapterNo);
+                const isRead = readChapterIds.has(ch.id) || readChapterNumbers.has(ch.chapter_number);
                 return (
                   <Link
                     key={ch.id}

@@ -102,7 +102,14 @@ function BrowseContent() {
         if (activeStatus !== 'all') filtered = filtered.filter((c) => c.status === activeStatus);
         if (selectedGenres.length > 0) {
           filtered = filtered.filter((c) =>
-            selectedGenres.some((slug) => c.genres?.some((g) => g.slug === slug))
+            selectedGenres.every((slug) =>
+              c.genres?.some(
+                (g) =>
+                  g.slug === slug ||
+                  String(g.id) === slug ||
+                  g.name?.toLowerCase() === slug.toLowerCase()
+              )
+            )
           );
         }
         if (searchQuery.trim()) {

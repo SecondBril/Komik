@@ -3,6 +3,8 @@
  * Menggunakan Microsoft Graph API REST untuk integrasi cloud storage
  */
 
+import path from 'path';
+
 interface OneDriveCredentials {
   clientId: string;
   clientSecret?: string;
@@ -141,7 +143,8 @@ export async function getOneDriveQuota(): Promise<OneDriveQuota> {
  */
 export async function uploadToOneDrive(
   imageBuffer: Buffer,
-  keyPath: string
+  keyPath: string,
+  contentType?: string
 ): Promise<OneDriveUploadResult> {
   const creds = getOneDriveCredentials();
   if (!creds) {
@@ -168,11 +171,20 @@ export async function uploadToOneDrive(
   const fullItemPath = `${creds.rootFolder}/${cleanKey}`;
   const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/${encodeURIComponent(fullItemPath).replace(/%2F/g, '/')}:/content`;
 
+  const ext = path.extname(cleanKey).toLowerCase();
+  const mimeType =
+    contentType ||
+    (ext === '.jpg' || ext === '.jpeg'
+      ? 'image/jpeg'
+      : ext === '.png'
+      ? 'image/png'
+      : 'image/webp');
+
   const res = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'image/webp',
+      'Content-Type': mimeType,
     },
     body: new Uint8Array(imageBuffer),
   });

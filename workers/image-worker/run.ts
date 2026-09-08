@@ -1,5 +1,5 @@
 import { getWorkerSupabaseClient } from '../lib/supabase-client';
-import { convertToWebP, validateImageBuffer } from './convert';
+import { processOptimalImage, validateImageBuffer } from './convert';
 import { uploadImageToR2 } from './upload-r2';
 import fetch from 'node-fetch';
 import pLimit from 'p-limit';
@@ -134,8 +134,6 @@ async function runImageWorker() {
               throw new Error(`Empty image URL for page ${page.page_number}`);
             }
 
-            const keyPath = `comics/${chapter.comic.slug}/${chapter.chapter_number}/${page.page_number}.webp`;
-
             // Case A: Page is ALREADY uploaded to Cloud Storage (OneDrive or ImageKit CDN)
             if (page.image_url.includes('ik.imagekit.io') || page.image_url.includes('/api/storage/onedrive')) {
               return;
@@ -167,9 +165,11 @@ async function runImageWorker() {
               }
 
               if (foundLocalPath) {
-                console.log(`[Image Worker] Found local WebP file for page ${page.page_number} (${foundLocalPath}). Uploading to Storage...`);
+                const ext = path.extname(foundLocalPath) || '.webp';
+                const localKeyPath = `comics/${chapter.comic.slug}/${chapter.chapter_number}/${page.page_number}${ext}`;
+                console.log(`[Image Worker] Found local file for page ${page.page_number} (${foundLocalPath}). Uploading to Storage...`);
                 const localBuffer = fs.readFileSync(foundLocalPath);
-                const cdnUrl = await uploadImageToR2(localBuffer, keyPath);
+                const cdnUrl = await uploadImageToR2(localBuffer, localKeyPath);
                 if (cdnUrl.startsWith('http') || cdnUrl.startsWith('/api/storage/')) {
                   await supabase.from('chapter_pages').update({ image_url: cdnUrl }).eq('id', page.id);
                 }
@@ -192,11 +192,13 @@ async function runImageWorker() {
 
             const originalBuffer = await fetchRemoteImageWithRetry(page.image_url, refererHeader, 3);
 
-            // Convert to WebP format
-            const webpBuffer = await convertToWebP(originalBuffer, 80);
+            // Convert to optimal format (WebP for normal pages, Progressive MozJPEG for strips > 16383px)
+            const { buffer: processedBuffer, extension, contentType } = await processOptimalImage(originalBuffer, 80);
 
-            // Upload to ImageKit / local: comics/{comic_slug}/{chapter_no}/{page_no}.webp
-            const cdnUrl = await uploadImageToR2(webpBuffer, keyPath);
+            const keyPath = `comics/${chapter.comic.slug}/${chapter.chapter_number}/${page.page_number}.${extension}`;
+
+            // Upload to OneDrive / ImageKit / local: comics/{comic_slug}/{chapter_no}/{page_no}.{extension}
+            const cdnUrl = await uploadImageToR2(processedBuffer, keyPath, contentType);
 
             // Update page image_url with final CDN URL
             await supabase

@@ -49,9 +49,16 @@ export async function GET(req: NextRequest) {
     const localPath = path.resolve(process.cwd(), 'public', cleanPath.startsWith('comics/') ? cleanPath : `comics/${cleanPath}`);
     if (fs.existsSync(localPath)) {
       const fileBuffer = fs.readFileSync(localPath);
+      const ext = path.extname(cleanPath).toLowerCase();
+      const contentType =
+        ext === '.jpg' || ext === '.jpeg'
+          ? 'image/jpeg'
+          : ext === '.png'
+          ? 'image/png'
+          : 'image/webp';
       return new NextResponse(fileBuffer, {
         headers: {
-          'Content-Type': 'image/webp',
+          'Content-Type': contentType,
           'Cache-Control': 'public, max-age=86400',
         },
       });

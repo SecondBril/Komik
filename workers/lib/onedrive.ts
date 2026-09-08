@@ -85,7 +85,8 @@ export async function getWorkerOneDriveAccessToken(): Promise<string> {
 
 export async function uploadToOneDriveWorker(
   imageBuffer: Buffer,
-  keyPath: string
+  keyPath: string,
+  contentType?: string
 ): Promise<{ url: string; size: number }> {
   const creds = getWorkerOneDriveCredentials();
   if (!creds) throw new Error('Kredensial OneDrive tidak tersedia');
@@ -95,11 +96,20 @@ export async function uploadToOneDriveWorker(
   const fullItemPath = `${creds.rootFolder}/${cleanKey}`;
   const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/${encodeURIComponent(fullItemPath).replace(/%2F/g, '/')}:/content`;
 
+  const ext = path.extname(cleanKey).toLowerCase();
+  const mimeType =
+    contentType ||
+    (ext === '.jpg' || ext === '.jpeg'
+      ? 'image/jpeg'
+      : ext === '.png'
+      ? 'image/png'
+      : 'image/webp');
+
   const res = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'image/webp',
+      'Content-Type': mimeType,
     },
     body: new Uint8Array(imageBuffer),
   });

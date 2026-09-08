@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
-// GET /api/browse?type=all&status=all&q=keyword&genres=1,2&sort=latest&page=1&limit=30
+// GET /api/browse?type=all&status=all&q=keyword&genres=action,romance&sort=latest&page=1&limit=30
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const type = searchParams.get('type') || 'all';
@@ -19,6 +19,70 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    let matchingComicIds: string[] | null = null;
+
+    // Multi-genre filtering (AND logic: comic must match ALL specified genres)
+    if (genres) {
+      const tokens = genres.split(',').map((g) => g.trim().toLowerCase()).filter(Boolean);
+      if (tokens.length > 0) {
+        // 1. Fetch all genres to resolve tokens (slugs, IDs, or names)
+        const { data: allGenres } = await supabase
+          .from('genres')
+          .select('id, name, slug');
+
+        const targetGenreIds: number[] = [];
+        for (const token of tokens) {
+          const matched = allGenres?.find(
+            (g) =>
+              String(g.id) === token ||
+              g.slug?.toLowerCase() === token ||
+              g.name?.toLowerCase() === token
+          );
+          if (matched && !targetGenreIds.includes(matched.id)) {
+            targetGenreIds.push(matched.id);
+          }
+        }
+
+        // If any requested genre doesn't exist in the system, no comic can match all requested genres
+        if (targetGenreIds.length < tokens.length) {
+          return NextResponse.json({
+            success: true,
+            data: [],
+            total: 0,
+            page,
+            limit,
+          });
+        }
+
+        // 2. Query junction table comic_genres
+        const { data: cgRows } = await supabase
+          .from('comic_genres')
+          .select('comic_id, genre_id')
+          .in('genre_id', targetGenreIds);
+
+        // 3. Count matches per comic_id: must match ALL target genres (AND filter)
+        const comicGenreCount: Record<string, number> = {};
+        (cgRows || []).forEach((row: any) => {
+          comicGenreCount[row.comic_id] = (comicGenreCount[row.comic_id] || 0) + 1;
+        });
+
+        matchingComicIds = Object.keys(comicGenreCount).filter(
+          (cid) => comicGenreCount[cid] >= targetGenreIds.length
+        );
+
+        // If no comics have ALL requested genres, return empty immediately
+        if (matchingComicIds.length === 0) {
+          return NextResponse.json({
+            success: true,
+            data: [],
+            total: 0,
+            page,
+            limit,
+          });
+        }
+      }
+    }
+
     let query = supabase
       .from('comics')
       .select(`
@@ -28,6 +92,9 @@ export async function GET(req: NextRequest) {
         chapters:chapters(id, chapter_number, title, released_at)
       `, { count: 'exact' });
 
+    if (matchingComicIds !== null) {
+      query = query.in('id', matchingComicIds);
+    }
     if (type !== 'all') query = query.eq('type', type);
     if (status !== 'all') query = query.eq('status', status);
     if (q) query = query.ilike('title', `%${q}%`);
@@ -61,13 +128,13 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Multi-genre filter (checks that comic has all requested genres, or at least one if multiple)
+    // Final safety check: ensure every comic has ALL requested genres
     let filteredComics = comics;
     if (genres) {
       const tokens = genres.split(',').map((g) => g.trim().toLowerCase()).filter(Boolean);
       if (tokens.length > 0) {
         filteredComics = comics.filter((c: any) =>
-          tokens.some((tok) =>
+          tokens.every((tok) =>
             c.genres?.some(
               (g: any) =>
                 String(g.id) === tok ||
@@ -82,7 +149,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       data: filteredComics,
-      total: genres ? filteredComics.length : (count ?? filteredComics.length),
+      total: count ?? filteredComics.length,
       page,
       limit,
     });

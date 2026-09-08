@@ -68,15 +68,24 @@ async function uploadToImageKitWithRetry(
  */
 export async function uploadImageToR2(
   imageBuffer: Buffer,
-  keyPath: string
+  keyPath: string,
+  contentType?: string
 ): Promise<string> {
   const cdnBaseUrl = (process.env.R2_PUBLIC_CDN_URL || '').replace(/\/$/, '');
+  const ext = path.extname(keyPath).toLowerCase();
+  const mimeType =
+    contentType ||
+    (ext === '.jpg' || ext === '.jpeg'
+      ? 'image/jpeg'
+      : ext === '.png'
+      ? 'image/png'
+      : 'image/webp');
 
   // 1. Coba upload ke OneDrive (Primary)
   const oneDriveCreds = getWorkerOneDriveCredentials();
   if (oneDriveCreds) {
     try {
-      const oneDriveRes = await uploadToOneDriveWorker(imageBuffer, keyPath);
+      const oneDriveRes = await uploadToOneDriveWorker(imageBuffer, keyPath, mimeType);
       console.log(`[OneDrive Upload Success] URL: ${oneDriveRes.url}`);
       return oneDriveRes.url;
     } catch (err: any) {
@@ -88,7 +97,8 @@ export async function uploadImageToR2(
   const imagekit = getImageKitClient();
   if (imagekit) {
     try {
-      const fileName = keyPath.split('/').pop() || 'page.webp';
+      const defaultFileName = mimeType === 'image/jpeg' ? 'page.jpg' : 'page.webp';
+      const fileName = keyPath.split('/').pop() || defaultFileName;
       const folderPath = '/' + keyPath.substring(0, keyPath.lastIndexOf('/'));
 
       const response = await uploadToImageKitWithRetry(imagekit, imageBuffer, fileName, folderPath, 3);
@@ -102,14 +112,14 @@ export async function uploadImageToR2(
     }
   }
 
-  // 2. Fallback to Supabase Storage if configured
+  // 3. Fallback to Supabase Storage if configured
   const supabase = getWorkerSupabaseClient();
   if (supabase) {
     try {
       const { data, error } = await supabase.storage
         .from('comics')
         .upload(keyPath, imageBuffer, {
-          contentType: 'image/webp',
+          contentType: mimeType,
           upsert: true,
         });
 
@@ -122,7 +132,7 @@ export async function uploadImageToR2(
     }
   }
 
-  // 3. Save WebP image locally to /public/comics/ directory for instant 100% working local preview
+  // 4. Save image locally to /public/comics/ directory for instant 100% working local preview
   try {
     const basePublicDir = fs.existsSync(path.resolve(process.cwd(), 'public'))
       ? path.resolve(process.cwd(), 'public')
@@ -137,7 +147,7 @@ export async function uploadImageToR2(
 
     fs.writeFileSync(localPublicDir, imageBuffer);
     const localPublicUrl = `/comics/${cleanKey}`;
-    console.log(`[Local Saved WebP] File: ${localPublicUrl}`);
+    console.log(`[Local Saved Image] File: ${localPublicUrl}`);
     return localPublicUrl;
   } catch (err: any) {
     console.error(`[Local Save Error]:`, err?.message || err);

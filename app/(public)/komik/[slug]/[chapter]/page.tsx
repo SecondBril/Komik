@@ -167,10 +167,23 @@ export default function ReadingViewerPage() {
         setPages(data.pages || []);
         setAllChapters(data.allChapters || []);
 
-        // Record reading history (Cloud & Local)
+        // Record reading history (Cloud & Local) with accurate comic and chapter metadata
         saveReadingHistory({
           comic_id: data.comic.id,
           chapter_id: data.currentChapter.id,
+          comic: {
+            id: data.comic.id,
+            slug: data.comic.slug,
+            title: data.comic.title,
+            cover_url: data.comic.cover_url,
+            type: data.comic.type,
+            author: data.comic.author,
+          },
+          chapter: {
+            id: data.currentChapter.id,
+            chapter_number: data.currentChapter.chapter_number,
+            title: data.currentChapter.title,
+          },
         });
       }
     } catch (err) {
