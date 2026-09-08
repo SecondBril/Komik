@@ -100,7 +100,7 @@ export async function getComics(filters?: FilterState): Promise<Comic[]> {
       if (!error && data) {
         return data.map((item: any) => {
           const sortedChapters = item.chapters?.sort(
-            (a: any, b: any) => new Date(b.released_at).getTime() - new Date(a.released_at).getTime()
+            (a: any, b: any) => (b.chapter_number ?? 0) - (a.chapter_number ?? 0)
           );
           return {
             ...item,

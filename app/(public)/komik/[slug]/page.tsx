@@ -9,7 +9,10 @@ import { getComicChapters } from '@/lib/queries/chapters';
 import { Comic, Chapter } from '@/lib/types';
 import { TypeBadge, StatusBadge, PriceBadge } from '@/components/ui/Badge';
 import { getReadChapterIds, getReadChapterNumbers, getLastReadChapter } from '@/lib/queries/history';
+import { createClient } from '@/lib/supabase/client';
+import { ReadingHistoryItem } from '@/lib/types';
 import { formatRelativeTime } from '@/lib/utils/relative-time';
+import { DecorativeBlobs } from '@/components/ui/DecorativeBlobs';
 import {
   ArrowLeft,
   BookOpen,
@@ -43,8 +46,42 @@ export default function ComicDetailPage() {
       const chapterList = await getComicChapters(slug);
       setChapters(chapterList);
 
-      // Check reading history (Track all read chapters)
       const comicIdOrSlug = comicData?.id || slug;
+
+      // ── Cek apakah user sedang login ──────────────────────────────────────
+      try {
+        const supabase = createClient();
+        if (supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            // User login → ambil history dari Supabase via API
+            const res = await fetch('/api/history', { cache: 'no-store' });
+            const json = await res.json();
+            if (json.success && Array.isArray(json.data)) {
+              const allHistory: ReadingHistoryItem[] = json.data;
+              // Filter hanya history untuk komik ini
+              const comicHistory = allHistory.filter(
+                (h) => h.comic_id === comicIdOrSlug || h.comic?.slug === slug
+              );
+              const readIds = new Set<string>(comicHistory.map((h) => h.chapter_id).filter(Boolean));
+              const readNums = new Set<number>(
+                comicHistory.map((h) => h.chapter?.chapter_number).filter((n): n is number => n !== undefined)
+              );
+              setReadChapterIds(readIds);
+              setReadChapterNumbers(readNums);
+              // Chapter terakhir dibaca = history pertama (sudah di-sort DESC by last_read_at)
+              if (comicHistory.length > 0) {
+                setLastReadChapterNo(comicHistory[0].chapter?.chapter_number ?? null);
+              }
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[ComicDetail] Gagal baca Supabase history, fallback ke cookie:', err);
+      }
+
+      // ── Guest / fallback → baca dari cookie ──────────────────────────────
       const readIds = getReadChapterIds(comicIdOrSlug);
       const readNums = getReadChapterNumbers(comicIdOrSlug);
       setReadChapterIds(readIds);
@@ -87,13 +124,9 @@ export default function ComicDetailPage() {
   }
 
   return (
-    <div className="relative min-h-screen bg-[#F7F2E6] pb-24 overflow-x-hidden">
-      {/* Background Decorative Circles (Positioned neatly outside content) */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute top-20 -left-12 w-32 h-32 rounded-full bg-[#E96379]/30 border-2 border-[#1A1A1A]/30" />
-        <div className="absolute top-[45%] -right-16 w-40 h-40 rounded-full bg-[#F6C945]/30 border-2 border-[#1A1A1A]/30" />
-        <div className="absolute bottom-10 -left-10 w-28 h-28 rounded-full bg-[#9086F4]/30 border-2 border-[#1A1A1A]/30" />
-      </div>
+    <div className="relative min-h-screen bg-[#F7F2E6] pb-24">
+      {/* Background Decorative Blobs */}
+      <DecorativeBlobs variant="detail" />
 
       {/* Main Responsive Container */}
       <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 flex flex-col gap-6 z-10">
@@ -206,8 +239,8 @@ export default function ComicDetailPage() {
                   <BookOpen className="w-5 h-5 stroke-[2.5]" />
                   <span className="truncate">
                     {lastReadChapterNo
-                      ? `Lanjut Membaca (Chapter ${lastReadChapterNo})`
-                      : `Mulai Baca Chapter Pertama (Ch. ${firstChapter.chapter_number})`}
+                      ? `Lanjut (Ch. ${lastReadChapterNo})`
+                      : `Mulai Baca (Ch. ${firstChapter.chapter_number})`}
                   </span>
                 </Link>
               </div>

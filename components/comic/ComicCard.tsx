@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Comic } from '@/lib/types';
-import { TypeBadge } from '@/components/ui/Badge';
+import { TypeBadge, StatusBadge } from '@/components/ui/Badge';
 import { formatRelativeTime } from '@/lib/utils/relative-time';
 import { Star } from 'lucide-react';
 
@@ -34,9 +34,12 @@ export const ComicCard: React.FC<ComicCardProps> = ({ comic, priority = false })
           className="object-cover transition-transform duration-300 group-hover:scale-105"
         />
         
-        {/* Top Badges */}
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 z-10">
-          <TypeBadge type={comic.type} />
+        {/* Top Badges (Type on left, Status on right) */}
+        <div className="absolute top-1.5 sm:top-2 left-1.5 sm:left-2 right-1.5 sm:right-2 flex items-center justify-between gap-1 z-10 pointer-events-none">
+          <TypeBadge type={comic.type} size="sm" />
+          {comic.status && (
+            <StatusBadge status={comic.status} size="sm" />
+          )}
         </div>
 
         {/* Rating overlay badge in Yellow Pill */}

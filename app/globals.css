@@ -18,7 +18,7 @@ body {
   background-color: #F7F2E6;
   color: #1A1A1A;
   font-family: 'Plus Jakarta Sans', 'Nunito', system-ui, -apple-system, sans-serif;
-  overflow-x: hidden;
+  overflow-x: clip;
   min-height: 100vh;
   -webkit-tap-highlight-color: transparent;
 }

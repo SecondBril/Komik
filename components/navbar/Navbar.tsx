@@ -224,18 +224,6 @@ export const Navbar: React.FC = () => {
               <span>History</span>
             </Link>
 
-            {/* Admin Button - ONLY visible for ag4863017@gmail.com */}
-            {userProfile?.email?.trim().toLowerCase() === 'ag4863017@gmail.com' && (
-              <Link
-                href="/admin"
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#F6C945] hover:bg-[#EDB72B] text-[#1A1A1A] border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all"
-                title="Panel Pengelola Admin"
-              >
-                <Shield className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>Admin</span>
-              </Link>
-            )}
-
             {/* Login / Profile Button - Shown on ALL screens (on mobile this is the only action next to logo) */}
             {isUserLoggedIn ? (
               <button
@@ -244,7 +232,7 @@ export const Navbar: React.FC = () => {
                 title="Keluar dari akun"
               >
                 <User className="w-3.5 h-3.5" />
-                <span className="truncate max-w-[80px] sm:max-w-[110px]">{userProfile?.name}</span>
+                <span className="truncate max-w-[135px] sm:max-w-[110px]">{userProfile?.name}</span>
                 <LogOut className="w-3 h-3 text-[#E96379]" />
               </button>
             ) : (
