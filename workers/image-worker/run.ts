@@ -34,7 +34,8 @@ async function fetchRemoteImageWithRetry(url: string, referer: string, maxRetrie
       const buffer = Buffer.from(arrayBuffer);
 
       if (!validateImageBuffer(buffer)) {
-        throw new Error(`Invalid image buffer`);
+        const ct = res.headers.get('content-type') || 'unknown';
+        throw new Error(`Invalid image buffer (size: ${buffer.length}B, type: ${ct})`);
       }
 
       return buffer;

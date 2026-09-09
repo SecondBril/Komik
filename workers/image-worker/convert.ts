@@ -132,7 +132,7 @@ export async function convertToWebP(inputBuffer: Buffer, quality = 80): Promise<
 /**
  * Validates image buffer size and format minimum threshold (checks magic bytes)
  */
-export function validateImageBuffer(buffer: Buffer, minSizeBytes = 2048): boolean {
+export function validateImageBuffer(buffer: Buffer, minSizeBytes = 32): boolean {
   if (!buffer || buffer.length < minSizeBytes) {
     return false;
   }

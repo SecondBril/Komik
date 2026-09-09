@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "scrape": "npx ts-node scraper/run.ts",
-    "process-images": "npx ts-node image-worker/run.ts"
+    "process-images": "npx ts-node image-worker/run.ts",
+    "repair-queue": "npx ts-node scraper/repair-queue.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.750.0",

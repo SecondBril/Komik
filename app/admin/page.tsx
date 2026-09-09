@@ -60,6 +60,22 @@ export default function AdminQueuePage() {
     }
   };
 
+  const handleReingest = async (chapterId: string) => {
+    try {
+      const res = await fetch(`/api/admin/reingest/${chapterId}`, { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        setToastMessage(json.message || 'Chapter berhasil dibersihkan dan diantrekan ulang.');
+        setIsToastOpen(true);
+        loadQueue();
+      } else {
+        alert('Gagal re-ingest chapter: ' + (json.error || 'Terjadi kesalahan'));
+      }
+    } catch (err: any) {
+      alert('Gagal re-ingest chapter: ' + err.message);
+    }
+  };
+
   const pendingCount = queueItems.filter((i) => i.status === 'pending').length;
   const processingCount = queueItems.filter((i) => i.status === 'processing').length;
   const failedCount = queueItems.filter((i) => i.status === 'failed').length;
@@ -152,7 +168,7 @@ export default function AdminQueuePage() {
             </div>
           </div>
         ) : (
-          <QueueTable queueItems={queueItems} onRetry={handleRetry} />
+          <QueueTable queueItems={queueItems} onRetry={handleRetry} onReingest={handleReingest} />
         )}
       </div>
 

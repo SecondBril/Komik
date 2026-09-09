@@ -183,9 +183,49 @@ export async function getComicDetailWithPuppeteer(
       comicSlug = slugify(rawTitle);
     }
 
-    const { chapterLinks, coverUrl } = await page.evaluate(() => {
-      const anchors = Array.from(document.querySelectorAll('a'));
-      const hrefs = anchors.map((a) => a.href).filter((h) => h && (h.includes('/view/') || h.includes('chapter')));
+    const { chapterLinks, coverUrl } = await page.evaluate((targetSlug) => {
+      // Primary: Look inside chapter list containers
+      const containerSelectors = [
+        '#chapterlist a',
+        '.clstyle a',
+        '.bxcl a',
+        '.eplister a',
+        '#chapter-list a',
+        '.chapter-list a',
+        '.lchx a',
+      ];
+      let anchors: HTMLAnchorElement[] = [];
+      for (const sel of containerSelectors) {
+        const found = Array.from(document.querySelectorAll<HTMLAnchorElement>(sel));
+        if (found.length > 0) {
+          anchors = found;
+          break;
+        }
+      }
+      // Fallback: only if no specific container found, query all links
+      if (anchors.length === 0) {
+        anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a'));
+      }
+
+      const cleanSlug = targetSlug ? targetSlug.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+
+      const hrefs = anchors
+        .map((a) => a.href)
+        .filter((h) => {
+          if (!h) return false;
+          const isChapterLink = h.includes('/view/') || h.includes('chapter');
+          if (!isChapterLink) return false;
+
+          // Critical: Link MUST belong to the target comic!
+          // Exclude recommendations / sidebar widgets belonging to other comics
+          if (cleanSlug) {
+            const cleanUrl = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (!cleanUrl.includes(cleanSlug) && !h.toLowerCase().includes(targetSlug.toLowerCase())) {
+              return false;
+            }
+          }
+          return true;
+        });
 
       const imgElements = Array.from(document.querySelectorAll('img'));
       const cover = imgElements
@@ -196,7 +236,7 @@ export async function getComicDetailWithPuppeteer(
         chapterLinks: Array.from(new Set(hrefs)),
         coverUrl: cover || undefined,
       };
-    });
+    }, comicSlug);
 
     const parsedChapters: Array<{ chapterNumber: number; url: string }> = [];
 
@@ -284,6 +324,7 @@ export async function scrapeChapterPageWithPuppeteer(
   await page.setViewport({ width: 1280, height: 800 });
 
   const capturedImages = new Set<string>();
+  const cleanComicSlug = comicSlug.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   page.on('request', (req) => {
     const url = req.url();
@@ -296,7 +337,11 @@ export async function scrapeChapterPageWithPuppeteer(
       !url.endsWith('.gif')
     ) {
       if (url.startsWith('http')) {
-        capturedImages.add(url);
+        // Only capture if it belongs to this comic or chapter
+        const cleanUrl = url.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (cleanUrl.includes(cleanComicSlug) || url.includes(comicSlug)) {
+          capturedImages.add(url);
+        }
       }
     }
   });
@@ -329,12 +374,14 @@ export async function scrapeChapterPageWithPuppeteer(
 
     await new Promise((r) => setTimeout(r, 2500));
 
-    // Extract all DOM img elements in sequential reading order
-    const domImages: string[] = await page.evaluate(() => {
+    // Extract all DOM img elements in sequential reading order from reader container
+    const domImages: string[] = await page.evaluate((targetSlug) => {
       const containerImgs = Array.from(
         document.querySelectorAll('#readerarea img, .rdcontent img, .entry-content img, .chapter-image img')
       );
       const allImgs = containerImgs.length > 0 ? containerImgs : Array.from(document.querySelectorAll('img'));
+
+      const cleanSlug = targetSlug ? targetSlug.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
 
       return allImgs
         .map((img: any) =>
@@ -345,18 +392,37 @@ export async function scrapeChapterPageWithPuppeteer(
           ''
         )
         .filter(
-          (src: string) =>
-            src &&
-            src.startsWith('http') &&
-            src.includes('storage.westmanga.blog/west/') &&
-            !src.includes('avatar') &&
-            !src.includes('logo') &&
-            !src.includes('/0ads/') &&
-            !src.includes('banner') &&
-            !src.includes('cover') &&
-            !src.endsWith('.gif')
+          (src: string) => {
+            if (!src || !src.startsWith('http')) return false;
+            if (!src.includes('storage.westmanga.blog/west/')) return false;
+            if (
+              src.includes('avatar') ||
+              src.includes('logo') ||
+              src.includes('/0ads/') ||
+              src.includes('banner') ||
+              src.includes('cover') ||
+              src.endsWith('.gif')
+            ) {
+              return false;
+            }
+
+            // Exclude images explicitly belonging to a DIFFERENT comic
+            if (cleanSlug) {
+              const cleanSrc = src.toLowerCase().replace(/[^a-z0-9]/g, '');
+              // Match /west/{other-comic}/chapter-...
+              const comicInPath = src.match(/storage\.westmanga\.blog\/west\/([^\/]+)\//i);
+              if (comicInPath) {
+                const pathSlug = comicInPath[1].toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (pathSlug !== cleanSlug && !cleanSlug.includes(pathSlug) && !pathSlug.includes(cleanSlug)) {
+                  return false; // Foreign comic image detected!
+                }
+              }
+            }
+
+            return true;
+          }
         );
-    });
+    }, comicSlug);
 
     // Deduplicate preserving DOM sequential reading order (ensuring page 1 is index 0, page 2 is index 1, etc.)
     const orderedImages: string[] = [];
@@ -369,7 +435,7 @@ export async function scrapeChapterPageWithPuppeteer(
       }
     }
 
-    // Append any network-intercepted images that weren't caught in the DOM query
+    // Append any network-intercepted images that strictly belong to this comic and weren't caught
     for (const url of capturedImages) {
       if (!seen.has(url) && url.includes('storage.westmanga.blog/west/') && !url.includes('cover')) {
         seen.add(url);

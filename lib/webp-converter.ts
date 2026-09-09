@@ -158,7 +158,7 @@ export async function saveAndUploadWebP(
 /**
  * Validates image buffer size and format minimum threshold (checks magic bytes)
  */
-export function validateImageBuffer(buffer: Buffer, minSizeBytes = 2048): boolean {
+export function validateImageBuffer(buffer: Buffer, minSizeBytes = 32): boolean {
   if (!buffer || buffer.length < minSizeBytes) {
     return false;
   }
