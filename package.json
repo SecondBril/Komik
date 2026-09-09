@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "scrape": "npm run scrape --prefix workers",
-    "process-images": "npm run process-images --prefix workers"
+    "process-images": "npm run process-images --prefix workers",
+    "repair-queue": "npm run repair-queue --prefix workers"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
