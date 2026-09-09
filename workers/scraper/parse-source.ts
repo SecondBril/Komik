@@ -436,12 +436,12 @@ export async function scrapeChapterPageWithPuppeteer(
     }
 
     // Append any network-intercepted images that strictly belong to this comic and weren't caught
-    for (const url of capturedImages) {
+    Array.from(capturedImages).forEach((url) => {
       if (!seen.has(url) && url.includes('storage.westmanga.blog/west/') && !url.includes('cover')) {
         seen.add(url);
         orderedImages.push(url);
       }
-    }
+    });
 
     const rawImageUrls = orderedImages;
 
