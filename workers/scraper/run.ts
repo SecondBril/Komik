@@ -199,15 +199,49 @@ async function runScraperWorker() {
             // If already uploaded, DO NOT touch or overwrite it!
           }
 
+          // Clean up any trailing orphan/phantom pages in DB that exceed fresh source reader pages and aren't uploaded
+          const extraPages = dbPages.filter(
+            (p) => p.page_number > sourceImages.length && !isAlreadyUploaded(p.image_url)
+          );
+          if (extraPages.length > 0) {
+            const extraIds = extraPages.map((p) => p.id);
+            await supabase.from('chapter_pages').delete().in('id', extraIds);
+            console.log(
+              `[Scraper Worker] -> Cleaned up ${extraPages.length} phantom/un-uploaded trailing page(s) from DB for Chapter ${chItem.chapterNumber}.`
+            );
+          }
+
           console.log(
             `[Scraper Worker] -> Chapter ${chItem.chapterNumber} repair synced: ${addedCount} missing pages added, ${updatedCount} un-uploaded pages refreshed.`
           );
 
-          // Reset status to 'pending' so image worker will upload ONLY the missing/un-uploaded pages
-          await supabase
-            .from('chapters')
-            .update({ status: 'pending' })
-            .eq('id', existingChapter.id);
+          // Verify if all pages of the chapter in DB are now complete and uploaded
+          const { data: updatedPages } = await supabase
+            .from('chapter_pages')
+            .select('page_number, image_url')
+            .eq('chapter_id', existingChapter.id)
+            .order('page_number', { ascending: true });
+
+          const allNowUploaded =
+            updatedPages &&
+            updatedPages.length >= 3 &&
+            updatedPages.every((p, idx) => p.page_number === idx + 1 && isAlreadyUploaded(p.image_url));
+
+          if (allNowUploaded) {
+            console.log(
+              `[Scraper Worker] -> Chapter ${chItem.chapterNumber} all ${updatedPages.length} pages verified complete & uploaded! Marking as 'published'.`
+            );
+            await supabase
+              .from('chapters')
+              .update({ status: 'published', retry_count: 0 })
+              .eq('id', existingChapter.id);
+          } else {
+            // Reset status to 'pending' so image worker will upload missing pages
+            await supabase
+              .from('chapters')
+              .update({ status: 'pending' })
+              .eq('id', existingChapter.id);
+          }
 
           continue;
         }

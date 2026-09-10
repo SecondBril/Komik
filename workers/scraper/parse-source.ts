@@ -326,14 +326,17 @@ export async function scrapeChapterPageWithPuppeteer(
   const capturedImages = new Set<string>();
   const cleanComicSlug = comicSlug.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  page.on('request', (req) => {
-    const url = req.url();
+  // Only intercept SUCCESSFUL HTTP 200 responses to prevent phantom/broken/404 images from entering queue
+  page.on('response', (res) => {
+    const url = res.url();
     if (
+      res.status() === 200 &&
       url.includes('storage.westmanga.blog/west/') &&
       !url.includes('/0ads/') &&
       !url.includes('logo') &&
       !url.includes('cover') &&
       !url.includes('btn_close') &&
+      !url.includes('error.png') &&
       !url.endsWith('.gif')
     ) {
       if (url.startsWith('http')) {
@@ -401,6 +404,7 @@ export async function scrapeChapterPageWithPuppeteer(
               src.includes('/0ads/') ||
               src.includes('banner') ||
               src.includes('cover') ||
+              src.includes('error.png') ||
               src.endsWith('.gif')
             ) {
               return false;

@@ -247,13 +247,22 @@ async function runImageWorker() {
             );
 
           } catch (err: any) {
-            console.error(`[Image Worker] Failed page ${page.page_number}:`, err?.message || err);
-            hasError = true;
-            await supabase.from('ingest_logs').insert({
-              chapter_id: chapter.id,
-              level: 'error',
-              message: `Page ${page.page_number} error: ${err?.message || err}`,
-            });
+            const is404 = String(err?.message || '').includes('404');
+            // If it's a 404 on a trailing page and we already have sufficient valid uploaded pages (>= 3)
+            if (is404 && page.page_number > alreadyUploadedPages.length && alreadyUploadedPages.length >= 3) {
+              console.warn(
+                `[Image Worker] Page ${page.page_number} returned HTTP 404 Not Found from source. Cleaned phantom page record from DB.`
+              );
+              await supabase.from('chapter_pages').delete().eq('id', page.id);
+            } else {
+              console.error(`[Image Worker] Failed page ${page.page_number}:`, err?.message || err);
+              hasError = true;
+              await supabase.from('ingest_logs').insert({
+                chapter_id: chapter.id,
+                level: 'error',
+                message: `Page ${page.page_number} error: ${err?.message || err}`,
+              });
+            }
           }
         })
       );
