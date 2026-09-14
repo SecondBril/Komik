@@ -91,3 +91,51 @@ export interface FilterState {
   query?: string;
   sort?: 'latest' | 'popular' | 'rating' | 'title';
 }
+
+export interface ComicAdaptation {
+  id: string;
+  comic_id: string;
+  start_chapter: number;
+  end_chapter: number;
+  anime_season?: string;
+  anime_episode_range?: string;
+  novel_chapter_range?: string;
+  novel_volume?: string;
+  arc_title?: string;
+  note?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface FranchiseRelation {
+  id?: string | number;
+  title: string;
+  relation_type: 'prequel' | 'sequel' | 'spinoff' | 'side_story' | 'novel' | 'anime' | 'alternative' | 'other';
+  format?: string;
+  cover_url?: string;
+  source: 'AniList' | 'MangaUpdates' | 'Kitsu' | 'MyAnimeList';
+  url?: string;
+  local_slug?: string;
+}
+
+export interface ComicRecommendation {
+  id?: string | number;
+  title: string;
+  cover_url?: string;
+  rating?: number;
+  format?: string;
+  local_slug?: string;
+}
+
+export interface ComicCharacter {
+  name: string;
+  native_name?: string;
+  role: 'MAIN' | 'SUPPORTING';
+  image_url?: string;
+}
+
+export interface ComicStaff {
+  name: string;
+  role: string;
+}
+

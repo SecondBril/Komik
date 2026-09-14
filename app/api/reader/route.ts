@@ -24,8 +24,8 @@ export async function GET(req: NextRequest) {
         .single();
 
       if (comic && !comicErr) {
-        // 2. Fetch current chapter with its pages AND all chapters in parallel
-        const [chapterRes, allChaptersRes] = await Promise.all([
+        // 2. Fetch current chapter with its pages, all chapters, and adaptation info in parallel
+        const [chapterRes, allChaptersRes, adaptationRes] = await Promise.all([
           supabase
             .from('chapters')
             .select(`
@@ -41,6 +41,15 @@ export async function GET(req: NextRequest) {
             .eq('comic_id', comic.id)
             .eq('status', 'published')
             .order('chapter_number', { ascending: true }),
+          supabase
+            .from('comic_adaptations')
+            .select('*')
+            .eq('comic_id', comic.id)
+            .lte('start_chapter', chapterNumber)
+            .gte('end_chapter', chapterNumber)
+            .order('start_chapter', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
         ]);
 
         if (chapterRes.data) {
@@ -50,6 +59,13 @@ export async function GET(req: NextRequest) {
           );
 
           const allChapters = allChaptersRes.data || [];
+          const adaptation = adaptationRes?.data
+            ? {
+                ...adaptationRes.data,
+                start_chapter: Number(adaptationRes.data.start_chapter),
+                end_chapter: Number(adaptationRes.data.end_chapter),
+              }
+            : null;
 
           return NextResponse.json(
             {
@@ -65,6 +81,7 @@ export async function GET(req: NextRequest) {
               },
               pages: sortedPages,
               allChapters,
+              adaptation,
             },
             {
               headers: {

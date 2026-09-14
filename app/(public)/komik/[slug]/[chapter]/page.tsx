@@ -4,12 +4,13 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { saveReadingHistory } from '@/lib/queries/history';
-import { Comic, Chapter, ChapterPage } from '@/lib/types';
+import { Comic, Chapter, ChapterPage, ComicAdaptation } from '@/lib/types';
 import { ViewerScroll } from '@/components/reader/ViewerScroll';
 import { ViewerPaged } from '@/components/reader/ViewerPaged';
 import { ChapterNav } from '@/components/reader/ChapterNav';
 import { ReaderFloatingControls } from '@/components/reader/ReaderFloatingControls';
 import { ChameleonMascot } from '@/components/ui/ChameleonMascot';
+import { AdaptationBanner } from '@/components/reader/AdaptationBanner';
 import {
   BookOpen,
   ChevronRight,
@@ -30,6 +31,7 @@ export default function ReadingViewerPage() {
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
   const [allChapters, setAllChapters] = useState<Chapter[]>([]);
   const [pages, setPages] = useState<ChapterPage[]>([]);
+  const [adaptation, setAdaptation] = useState<ComicAdaptation | null>(null);
   const [readMode, setReadMode] = useState<'scroll' | 'paged'>('scroll');
   const [containerWidth, setContainerWidth] = useState<'normal' | 'large' | 'full'>('large');
   const [isNavVisible, setIsNavVisible] = useState(true);
@@ -166,6 +168,7 @@ export default function ReadingViewerPage() {
         setCurrentChapter(data.currentChapter);
         setPages(data.pages || []);
         setAllChapters(data.allChapters || []);
+        setAdaptation(data.adaptation || null);
 
         // Record reading history (Cloud & Local) with accurate comic and chapter metadata
         saveReadingHistory({
@@ -245,6 +248,13 @@ export default function ReadingViewerPage() {
         containerWidth={containerWidth}
         onToggleContainerWidth={setContainerWidth}
         isVisible={isNavVisible}
+      />
+
+      {/* Adaptation info banner (Anime & Novel) */}
+      <AdaptationBanner
+        adaptation={adaptation}
+        chapterNumber={chapterNo}
+        comicTitle={comic.title}
       />
 
       {/* Main Reading Viewers */}

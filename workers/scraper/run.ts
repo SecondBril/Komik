@@ -4,6 +4,7 @@ import {
   getComicDetailWithPuppeteer,
   scrapeChapterPageWithPuppeteer,
 } from './parse-source';
+import { fetchComicMetadata, syncWorkerComicGenres } from '../lib/comic-metadata';
 
 async function runScraperWorker() {
   console.log('[Scraper Worker] Starting ingestion run...');
@@ -57,30 +58,49 @@ async function runScraperWorker() {
       // 2. Find or Auto-Create Comic in Supabase
       let { data: comic } = await supabase
         .from('comics')
-        .select('id, title, slug')
+        .select('id, title, slug, author, synopsis, cover_url')
         .eq('slug', comicDetail.comicSlug)
-        .single();
+        .maybeSingle();
 
       if (!comic) {
-        console.log(`[Scraper Worker] Comic "${comicDetail.comicTitle}" not found in DB. Auto-creating comic...`);
+        console.log(`[Scraper Worker] Comic "${comicDetail.comicTitle}" not found in DB. Auto-fetching metadata from AniList/Kitsu...`);
+        const metadata = await fetchComicMetadata(comicDetail.comicTitle);
+        if (metadata) {
+          console.log(`[Scraper Worker] Found metadata for "${comicDetail.comicTitle}": Type=${metadata.type}, Author=${metadata.author}, Rating=${metadata.rating}`);
+        } else {
+          console.log(`[Scraper Worker] No external metadata found for "${comicDetail.comicTitle}". Using fallback defaults.`);
+        }
+
         const coverUrl =
+          metadata?.cover_url ||
           comicDetail.coverUrl ||
           'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+
+        const finalTitle = metadata?.title || comicDetail.comicTitle;
+        const finalType = metadata?.type || 'manhwa';
+        const finalSynopsis =
+          metadata?.synopsis ||
+          `Comic ${comicDetail.comicTitle} English description.`;
+        const finalAuthor = metadata?.author || 'Unknown Author';
+        const finalStatus = metadata?.status || 'ongoing';
+        const finalRating = metadata?.rating || 4.5;
+        const finalAltTitles = metadata?.alt_titles || [];
 
         const { data: newComic, error: comicErr } = await supabase
           .from('comics')
           .insert({
             slug: comicDetail.comicSlug,
-            title: comicDetail.comicTitle,
-            type: 'manhwa',
-            synopsis: `Komik ${comicDetail.comicTitle} terjemahan Bahasa Indonesia terbaru.`,
+            title: finalTitle,
+            alt_titles: finalAltTitles,
+            type: finalType,
+            synopsis: finalSynopsis,
             cover_url: coverUrl,
-            author: 'Unknown Author',
-            status: 'ongoing',
-            rating: 4.8,
+            author: finalAuthor,
+            status: finalStatus,
+            rating: finalRating,
             source_id: source.id,
           })
-          .select('id, title, slug')
+          .select('id, title, slug, author, synopsis, cover_url')
           .single();
 
         if (comicErr || !newComic) {
@@ -89,6 +109,37 @@ async function runScraperWorker() {
         }
         comic = newComic;
         console.log(`[Scraper Worker] Successfully created comic "${comic.title}" (ID: ${comic.id}).`);
+
+        // Sync genres from metadata
+        if (metadata?.genres && metadata.genres.length > 0) {
+          await syncWorkerComicGenres(supabase, comic.id, metadata.genres);
+          console.log(`[Scraper Worker] Synced ${metadata.genres.length} genres for "${comic.title}".`);
+        }
+      } else {
+        // If existing comic has default/placeholder data, enrich it automatically
+        const isUnknownAuthor = !comic.author || /unknown/i.test(comic.author);
+        const isDefaultSynopsis = !comic.synopsis || comic.synopsis.includes('terjemahan Bahasa Indonesia');
+        if (isUnknownAuthor || isDefaultSynopsis) {
+          console.log(`[Scraper Worker] Existing comic "${comic.title}" has default data. Auto-enriching from API...`);
+          const meta = await fetchComicMetadata(comic.title);
+          if (meta) {
+            const updateObj: Record<string, any> = {
+              type: meta.type,
+              status: meta.status,
+              rating: meta.rating,
+              alt_titles: meta.alt_titles,
+            };
+            if (meta.synopsis) updateObj.synopsis = meta.synopsis;
+            if (meta.author && meta.author !== 'Unknown Author') updateObj.author = meta.author;
+            if (comic.cover_url?.includes('unsplash') && meta.cover_url) updateObj.cover_url = meta.cover_url;
+
+            await supabase.from('comics').update(updateObj).eq('id', comic.id);
+            if (meta.genres?.length) {
+              await syncWorkerComicGenres(supabase, comic.id, meta.genres);
+            }
+            console.log(`[Scraper Worker] Successfully enriched existing comic "${comic.title}".`);
+          }
+        }
       }
 
       // 3. DB-FIRST CHECK: Fetch ALL existing chapter records for this comic from Supabase

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { saveAndUploadWebP } from '@/lib/webp-converter';
+import { fetchComicMetadata, syncComicGenres } from '@/lib/comic-metadata';
 
 function slugify(text: string): string {
   return text
@@ -43,7 +44,9 @@ export async function POST(req: NextRequest) {
       }
 
       const coverFile = formData.get('coverFile') as File | null;
-      let coverUrl = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+      let coverUrl =
+        (formData.get('coverUrl') as string) ||
+        'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
 
       if (coverFile && coverFile.size > 0) {
         const coverArrayBuffer = await coverFile.arrayBuffer();
@@ -61,17 +64,44 @@ export async function POST(req: NextRequest) {
       if (existingComic) {
         comicId = existingComic.id;
       } else {
+        // If author or synopsis is missing/default, auto-fetch from AniList / Kitsu in English
+        let finalAuthor = author || '';
+        let finalSynopsis = synopsis || '';
+        let finalType = type;
+        let finalCover = coverUrl;
+        let finalRating = 4.8;
+        let altTitles: string[] = [];
+        let fetchedGenres: string[] = [];
+
+        if (!finalAuthor || finalAuthor === 'Unknown Author' || !finalSynopsis) {
+          try {
+            const meta = await fetchComicMetadata(comicTitle);
+            if (meta) {
+              if (!finalAuthor || finalAuthor === 'Unknown Author') finalAuthor = meta.author;
+              if (!finalSynopsis) finalSynopsis = meta.synopsis;
+              if (!type) finalType = meta.type;
+              if (coverUrl.includes('unsplash') && meta.cover_url) finalCover = meta.cover_url;
+              if (meta.rating) finalRating = meta.rating;
+              altTitles = meta.alt_titles;
+              fetchedGenres = meta.genres;
+            }
+          } catch (e) {
+            console.warn('[Manual Upload] Metadata enrich failed:', e);
+          }
+        }
+
         const { data: newComic, error: comicErr } = await supabase
           .from('comics')
           .insert({
             slug: comicSlug,
             title: comicTitle,
-            type,
-            synopsis: synopsis || `Komik ${comicTitle} terjemahan Bahasa Indonesia.`,
-            cover_url: coverUrl,
-            author: author || 'Unknown Author',
+            alt_titles: altTitles,
+            type: finalType,
+            synopsis: finalSynopsis || `Comic ${comicTitle} English description.`,
+            cover_url: finalCover,
+            author: finalAuthor || 'Unknown Author',
             status: comicStatus,
-            rating: 4.9,
+            rating: finalRating,
           })
           .select('id, slug, title')
           .single();
@@ -80,6 +110,11 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ success: false, error: `Gagal membuat komik baru: ${comicErr?.message}` }, { status: 500 });
         }
         comicId = newComic.id;
+
+        // Sync genres if available
+        if (fetchedGenres.length > 0) {
+          await syncComicGenres(supabase, comicId, fetchedGenres);
+        }
       }
     } else {
       if (!comicId) {

@@ -16,6 +16,9 @@ import {
   Loader2,
   FileImage,
   ChevronDown,
+  Sparkles,
+  Search,
+  X,
 } from 'lucide-react';
 
 interface ComicOption {
@@ -41,6 +44,13 @@ export default function AdminUploadPage() {
   const [comicStatus, setComicStatus] = useState('ongoing');
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [apiCoverUrl, setApiCoverUrl] = useState<string>('');
+
+  // API Search Modal State
+  const [apiSearchModalOpen, setApiSearchModalOpen] = useState(false);
+  const [apiSearchQuery, setApiSearchQuery] = useState('');
+  const [apiSearchResults, setApiSearchResults] = useState<any[]>([]);
+  const [isSearchingApi, setIsSearchingApi] = useState(false);
 
   // Form Fields - Existing Comic
   const [selectedComicId, setSelectedComicId] = useState('');
@@ -99,6 +109,50 @@ export default function AdminUploadPage() {
     setSlug(generatedSlug);
   };
 
+  // API Auto-fill Handlers
+  const handleOpenApiSearch = () => {
+    const q = title || '';
+    setApiSearchQuery(q);
+    setApiSearchModalOpen(true);
+    if (q.trim()) {
+      executeApiSearch(q);
+    }
+  };
+
+  const executeApiSearch = async (queryText: string) => {
+    if (!queryText.trim()) return;
+    setIsSearchingApi(true);
+    try {
+      const res = await fetch(`/api/admin/comics/enrich?q=${encodeURIComponent(queryText.trim())}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setApiSearchResults(data.data);
+      } else {
+        setApiSearchResults([]);
+      }
+    } catch (err) {
+      console.error('API search failed:', err);
+      setApiSearchResults([]);
+    } finally {
+      setIsSearchingApi(false);
+    }
+  };
+
+  const handleSelectApiComic = (item: any) => {
+    setTitle(item.title);
+    handleTitleChange(item.title);
+    if (item.type) setType(item.type);
+    if (item.author) setAuthor(item.author);
+    if (item.synopsis) setSynopsis(item.synopsis);
+    if (item.status) setComicStatus(item.status);
+    if (item.cover_url) {
+      setApiCoverUrl(item.cover_url);
+      setCoverPreview(item.cover_url);
+      setCoverFile(null);
+    }
+    setApiSearchModalOpen(false);
+  };
+
   // Cover Image Selection
   const handleCoverSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -150,8 +204,8 @@ export default function AdminUploadPage() {
         setErrorMessage('Judul komik wajib diisi.');
         return;
       }
-      if (!coverFile) {
-        setErrorMessage('File gambar cover komik wajib dipilih.');
+      if (!coverFile && !apiCoverUrl) {
+        setErrorMessage('File gambar cover komik wajib dipilih atau diambil dari API.');
         return;
       }
     } else {
@@ -181,6 +235,8 @@ export default function AdminUploadPage() {
         formData.append('comicStatus', comicStatus);
         if (coverFile) {
           formData.append('coverFile', coverFile);
+        } else if (apiCoverUrl) {
+          formData.append('coverUrl', apiCoverUrl);
         }
       } else {
         formData.append('selectedComicId', selectedComicId);
@@ -326,9 +382,20 @@ export default function AdminUploadPage() {
           {/* New Comic Information */}
           {isNewComic ? (
             <div className="bg-white border-2 border-[#1A1A1A] rounded-2xl sm:rounded-3xl p-5 shadow-[3px_3px_0px_#1A1A1A] flex flex-col gap-4">
-              <h3 className="text-[11px] font-black uppercase tracking-wider text-[#1A1A1A] flex items-center gap-2">
-                <BookOpen className="w-4 h-4 text-[#2E7D6E]" /> Informasi Komik Baru
-              </h3>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-[#1A1A1A] flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-[#2E7D6E]" /> Informasi Komik Baru
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleOpenApiSearch}
+                  className="px-3 py-1.5 rounded-full bg-[#E6F4EA] hover:bg-[#2E7D6E] hover:text-white border-2 border-[#1A1A1A] text-[11px] font-black text-[#2E7D6E] shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] flex items-center gap-1.5 transition-all"
+                  title="Search and auto-fill data from AniList/Kitsu API"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Auto-Fill dari API</span>
+                </button>
+              </div>
 
               {/* Title */}
               <div>
@@ -415,7 +482,14 @@ export default function AdminUploadPage() {
 
               {/* Cover Image Upload */}
               <div>
-                <label className="block text-xs font-black text-[#1A1A1A] mb-1">Cover Komik *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-black text-[#1A1A1A]">Cover Komik *</label>
+                  {apiCoverUrl && (
+                    <span className="text-[10px] font-black text-[#2E7D6E] bg-[#E6F4EA] px-2 py-0.5 rounded-full border border-[#2E7D6E]">
+                      ✓ Dari API (HD)
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3">
                   {coverPreview ? (
                     <div className="relative w-16 h-22 rounded-xl overflow-hidden border-2 border-[#1A1A1A] shadow-sm shrink-0 bg-[#FAF7F0]">
@@ -615,6 +689,127 @@ export default function AdminUploadPage() {
           </div>
         </div>
       </form>
+
+      {/* ═══ Modal: Search Comic from API ═══════════════════════════════════ */}
+      {apiSearchModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#F7F2E6] border-[3px] border-[#1A1A1A] rounded-3xl w-full max-w-xl flex flex-col shadow-[8px_8px_0px_#1A1A1A] max-h-[85vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-5 border-b-2 border-[#1A1A1A] bg-white shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#2E7D6E] text-white border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] flex items-center justify-center">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#1A1A1A]">Cari &amp; Isi Otomatis dari API</h3>
+                  <p className="text-xs text-[#7A756D] font-medium">
+                    Pencarian database global AniList &amp; Kitsu (English).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setApiSearchModalOpen(false)}
+                className="p-2 rounded-full bg-white hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Search Input Bar */}
+            <div className="p-4 bg-white border-b-2 border-[#1A1A1A] shrink-0">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  executeApiSearch(apiSearchQuery);
+                }}
+                className="flex items-center gap-2"
+              >
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-[#1A1A1A] absolute left-3.5 top-1/2 -translate-y-1/2 stroke-[2.5]" />
+                  <input
+                    type="text"
+                    value={apiSearchQuery}
+                    onChange={(e) => setApiSearchQuery(e.target.value)}
+                    placeholder="Ketik judul komik (misal: Solo Leveling, One Piece)..."
+                    className="w-full bg-[#FAF7F0] border-2 border-[#1A1A1A] rounded-full pl-10 pr-4 py-2 text-xs font-bold text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSearchingApi || !apiSearchQuery.trim()}
+                  className="px-4 py-2 rounded-full bg-[#F6C945] hover:bg-[#EDB72B] text-[#1A1A1A] border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                >
+                  {isSearchingApi ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                  <span>Cari</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Search Results List */}
+            <div className="overflow-y-auto p-4 flex flex-col gap-3">
+              {isSearchingApi ? (
+                <div className="py-12 flex flex-col items-center justify-center text-[#7A756D] gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-[#2E7D6E]" />
+                  <span className="text-xs font-bold">Mencari komik di AniList / Kitsu...</span>
+                </div>
+              ) : apiSearchResults.length === 0 ? (
+                <div className="py-10 text-center text-[#7A756D] text-xs font-medium">
+                  {apiSearchQuery ? 'Tidak ada komik yang cocok ditemukan di API.' : 'Ketik judul komik dan klik Cari.'}
+                </div>
+              ) : (
+                apiSearchResults.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-white border-2 border-[#1A1A1A] rounded-2xl p-3.5 shadow-[2px_2px_0px_#1A1A1A] flex items-start gap-3 hover:bg-[#FAF7F0] transition-colors"
+                  >
+                    <div className="w-14 h-20 rounded-xl overflow-hidden border-2 border-[#1A1A1A] shrink-0 bg-[#FAF7F0]">
+                      {item.cover_url ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={item.cover_url} alt={item.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[10px] text-[#7A756D]">
+                          No Cover
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-[#FAF7F0] border border-[#1A1A1A]">
+                          {item.type}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-[#F6C945] border border-[#1A1A1A]">
+                          ⭐ {item.rating}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-[#7A756D]">
+                          {item.status}
+                        </span>
+                      </div>
+                      <h4 className="text-xs font-black text-[#1A1A1A] truncate">{item.title}</h4>
+                      <p className="text-[11px] text-[#7A756D] font-medium truncate mt-0.5">
+                        Author: {item.author || 'Unknown'}
+                      </p>
+                      {item.synopsis && (
+                        <p className="text-[10px] text-[#8C8C8C] line-clamp-2 mt-1">
+                          {item.synopsis}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectApiComic(item)}
+                        className="mt-2.5 px-3 py-1 rounded-full bg-[#2E7D6E] hover:bg-[#256358] text-white border-2 border-[#1A1A1A] text-[11px] font-black shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Gunakan Data Ini</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

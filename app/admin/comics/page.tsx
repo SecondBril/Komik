@@ -23,8 +23,11 @@ import {
   Star,
   Tags,
   Check,
+  Sparkles,
+  Film,
 } from 'lucide-react';
 import { Toast } from '@/components/ui/Toast';
+import { AdaptationManagerModal } from '@/components/admin/AdaptationManagerModal';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -133,6 +136,20 @@ export default function AdminComicsPage() {
   const [reorderedPages, setReorderedPages] = useState<ChapterPage[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
   const [isSavingChapter, setIsSavingChapter] = useState(false);
+
+  // Ingest / Enrich States
+  const [enrichingComicId, setEnrichingComicId] = useState<string | null>(null);
+  const [isBatchEnriching, setIsBatchEnriching] = useState(false);
+  const [isModalEnriching, setIsModalEnriching] = useState(false);
+
+  // Adaptation Modal
+  const [adaptationComic, setAdaptationComic] = useState<AdminComic | null>(null);
+  const [isAdaptationModalOpen, setIsAdaptationModalOpen] = useState(false);
+
+  const handleOpenAdaptations = (comic: AdminComic) => {
+    setAdaptationComic(comic);
+    setIsAdaptationModalOpen(true);
+  };
 
   // Toast
   const [toastMessage, setToastMessage] = useState('');
@@ -338,6 +355,114 @@ export default function AdminComicsPage() {
     }
   };
 
+  // Enrich single comic from 3rd party API (AniList / Kitsu)
+  const handleEnrichSingleComic = async (comic: AdminComic) => {
+    setEnrichingComicId(comic.id);
+    try {
+      const res = await fetch('/api/admin/comics/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comicId: comic.id, force: true }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Comic "${comic.title}" successfully enriched from API!`);
+        await fetchComics();
+      } else {
+        alert(`Enrichment failed: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err?.message || err}`);
+    } finally {
+      setEnrichingComicId(null);
+    }
+  };
+
+  // Batch enrich all default comics
+  const handleBatchEnrichDefaults = async () => {
+    if (
+      !confirm(
+        'Auto-enrich all comics that currently have default or placeholder data (author unknown, placeholder cover/synopsis) from external API?'
+      )
+    ) {
+      return;
+    }
+    setIsBatchEnriching(true);
+    try {
+      const res = await fetch('/api/admin/comics/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enrichAllDefaults: true }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || 'Batch enrichment completed successfully!');
+        await fetchComics();
+      } else {
+        alert(`Batch enrichment failed: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err?.message || err}`);
+    } finally {
+      setIsBatchEnriching(false);
+    }
+  };
+
+  // Fetch API metadata in Edit Modal
+  const handleFetchApiForEditModal = async () => {
+    const query = editComicForm.title || editingComic?.title;
+    if (!query) return;
+
+    setIsModalEnriching(true);
+    try {
+      const res = await fetch('/api/admin/comics/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        const meta = data.data;
+        setEditComicForm((prev) => ({
+          ...prev,
+          author: meta.author || prev.author,
+          synopsis: meta.synopsis || prev.synopsis,
+          type: meta.type || prev.type,
+          rating: meta.rating || prev.rating,
+          cover_url: meta.cover_url || prev.cover_url,
+          status: meta.status || prev.status,
+        }));
+
+        // Match and select genres if available
+        if (meta.genres && meta.genres.length > 0 && availableGenres.length > 0) {
+          const matchedIds = availableGenres
+            .filter((g) =>
+              meta.genres.some(
+                (mg: string) =>
+                  mg.toLowerCase() === g.name.toLowerCase() ||
+                  mg.toLowerCase() === g.slug.toLowerCase()
+              )
+            )
+            .map((g) => g.id);
+
+          if (matchedIds.length > 0) {
+            setSelectedGenreIds((prev) => Array.from(new Set([...prev, ...matchedIds])));
+          }
+        }
+
+        showToast(
+          `Metadata for "${meta.title}" loaded from ${meta.sourceApi.toUpperCase()}! Review and save.`
+        );
+      } else {
+        alert(`Could not find metadata for "${query}": ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err?.message}`);
+    } finally {
+      setIsModalEnriching(false);
+    }
+  };
+
   // Open edit chapter modal
   const openEditChapter = (chapter: AdminChapter) => {
     setEditingChapter(chapter);
@@ -404,6 +529,15 @@ export default function AdminComicsPage() {
     return matchesSearch && matchesType;
   });
 
+  const defaultComicsCount = comics.filter(
+    (c) =>
+      !c.author ||
+      /unknown/i.test(c.author) ||
+      !c.synopsis ||
+      c.synopsis.includes('terjemahan Bahasa Indonesia') ||
+      c.cover_url?.includes('unsplash')
+  ).length;
+
   return (
     <div className="flex flex-col gap-6">
       {/* Header Banner */}
@@ -422,12 +556,29 @@ export default function AdminComicsPage() {
               </span>
             </div>
             <p className="text-xs text-[#7A756D] font-medium mt-0.5">
-              Kelola komik, edit genre &amp; rating, atur chapter, dan reorder urutan halaman gambar.
+              Kelola komik, auto-enrich API, edit genre &amp; rating, atur chapter, dan reorder halaman.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {defaultComicsCount > 0 && (
+            <button
+              type="button"
+              onClick={handleBatchEnrichDefaults}
+              disabled={isBatchEnriching}
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-[#2E7D6E] hover:bg-[#256358] text-white border-2 border-[#1A1A1A] text-xs font-black shadow-[3px_3px_0px_#1A1A1A] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0px_#1A1A1A] transition-all disabled:opacity-60"
+              title="Auto-fill and enrich default comics from AniList/Kitsu API (English)"
+            >
+              {isBatchEnriching ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4 fill-white" />
+              )}
+              <span>Auto-Enrich ({defaultComicsCount} Default)</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -596,6 +747,27 @@ export default function AdminComicsPage() {
                       <div className="flex items-center justify-end gap-2">
                         <button
                           type="button"
+                          onClick={() => handleOpenAdaptations(c)}
+                          className="p-2 rounded-full bg-[#EBF3FE] hover:bg-[#D7E7FD] border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] text-[#2A4FCB] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                          title="Kelola Adaptasi Anime & Novel"
+                        >
+                          <Film className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleEnrichSingleComic(c)}
+                          disabled={enrichingComicId === c.id}
+                          className="p-2 rounded-full bg-[#FAF7F0] hover:bg-[#2E7D6E] hover:text-white border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] text-[#2E7D6E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50"
+                          title="Auto-enrich metadata from AniList/Kitsu API (English)"
+                        >
+                          {enrichingComicId === c.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => openEditComic(c)}
                           className="p-2 rounded-full bg-white hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] text-[#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all"
                           title="Edit Komik (Genre, Rating, Status, dll)"
@@ -648,6 +820,34 @@ export default function AdminComicsPage() {
 
             {/* Form Scrollable Content */}
             <div className="overflow-y-auto p-5 sm:p-6 flex flex-col gap-4">
+              {/* API Auto-fill Helper Banner */}
+              <div className="bg-[#E6F4EA] border-2 border-[#1A1A1A] rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-[2px_2px_0px_#1A1A1A]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#2E7D6E] text-white border-2 border-[#1A1A1A] flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-[#1A1A1A]">Ambil Data dari AniList / Kitsu (English)</h4>
+                    <p className="text-[11px] text-[#4A463F]">
+                      Otomatis isi sinopsis, genre, author, rating, tipe, dan cover beresolusi tinggi.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleFetchApiForEditModal}
+                  disabled={isModalEnriching}
+                  className="px-3.5 py-1.5 rounded-full bg-white hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                >
+                  {isModalEnriching ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[#2E7D6E]" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-[#2E7D6E]" />
+                  )}
+                  <span>Tarik Data API</span>
+                </button>
+              </div>
+
               {/* Cover Preview & URL */}
               <div className="flex items-center gap-4 bg-white border-2 border-[#1A1A1A] rounded-2xl p-3.5 shadow-sm">
                 <div className="w-16 h-22 rounded-xl overflow-hidden border-2 border-[#1A1A1A] bg-[#FAF7F0] shrink-0">
@@ -1235,6 +1435,17 @@ export default function AdminComicsPage() {
           </div>
         </div>
       )}
+
+      {/* ═══ Modal: Kelola Adaptasi Anime & Novel ════════════════════════════ */}
+      <AdaptationManagerModal
+        comic={adaptationComic}
+        isOpen={isAdaptationModalOpen}
+        onClose={() => {
+          setIsAdaptationModalOpen(false);
+          setAdaptationComic(null);
+        }}
+        onNotify={showToast}
+      />
 
       <Toast message={toastMessage} isOpen={isToastOpen} onClose={() => setIsToastOpen(false)} />
     </div>

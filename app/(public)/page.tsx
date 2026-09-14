@@ -101,8 +101,10 @@ export default async function HomePage() {
               <h2 className="text-white text-lg sm:text-2xl lg:text-3xl font-black tracking-tight drop-shadow-md line-clamp-2">
                 {featuredComic.title}
               </h2>
-              <p className="text-white/80 text-xs sm:text-sm line-clamp-1 max-w-xl hidden sm:block">
-                {featuredComic.synopsis}
+              <p className="text-white/80 text-xs sm:text-sm max-w-xl hidden sm:block">
+                {featuredComic.synopsis.length > 50
+                  ? `${featuredComic.synopsis.substring(0, 50)}...`
+                  : featuredComic.synopsis}
               </p>
             </div>
           </Link>

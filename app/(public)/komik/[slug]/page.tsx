@@ -6,13 +6,16 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { getComicBySlug } from '@/lib/queries/comics';
 import { getComicChapters } from '@/lib/queries/chapters';
-import { Comic, Chapter } from '@/lib/types';
+import { getComicAdaptations } from '@/lib/queries/adaptations';
+import { Comic, Chapter, ComicAdaptation } from '@/lib/types';
 import { TypeBadge, StatusBadge, PriceBadge } from '@/components/ui/Badge';
 import { getReadChapterIds, getReadChapterNumbers, getLastReadChapter } from '@/lib/queries/history';
 import { createClient } from '@/lib/supabase/client';
 import { ReadingHistoryItem } from '@/lib/types';
 import { formatRelativeTime } from '@/lib/utils/relative-time';
 import { DecorativeBlobs } from '@/components/ui/DecorativeBlobs';
+import { AdaptationTimeline } from '@/components/comic/AdaptationTimeline';
+import { RelatedComicsSection } from '@/components/comic/RelatedComicsSection';
 import {
   ArrowLeft,
   BookOpen,
@@ -23,6 +26,7 @@ import {
   Search,
   X,
   Compass,
+  Film,
 } from 'lucide-react';
 
 export default function ComicDetailPage() {
@@ -31,6 +35,7 @@ export default function ComicDetailPage() {
 
   const [comic, setComic] = useState<Comic | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [adaptations, setAdaptations] = useState<ComicAdaptation[]>([]);
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
   const [chapterSearch, setChapterSearch] = useState('');
   const [lastReadChapterNo, setLastReadChapterNo] = useState<number | null>(null);
@@ -45,6 +50,10 @@ export default function ComicDetailPage() {
 
       const chapterList = await getComicChapters(slug);
       setChapters(chapterList);
+
+      if (comicData?.id) {
+        getComicAdaptations(comicData.id).then(setAdaptations);
+      }
 
       const comicIdOrSlug = comicData?.id || slug;
 
@@ -288,7 +297,15 @@ export default function ComicDetailPage() {
           </div>
         </div>
 
-        {/* 3. Complete Chapter List with Search Chapter Input */}
+        {/* 3. Adaptation Roadmap / Timeline (Anime & Novel) */}
+        {adaptations.length > 0 && (
+          <AdaptationTimeline
+            adaptations={adaptations}
+            comicTitle={comic.title}
+          />
+        )}
+
+        {/* 4. Complete Chapter List with Search Chapter Input */}
         <div className="w-full bg-white rounded-[32px] sm:rounded-[40px] border-[3px] border-[#1A1A1A] shadow-[6px_6px_0px_#1A1A1A] p-5 sm:p-8 flex flex-col gap-4 overflow-hidden box-border">
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b-2 border-[#1A1A1A]">
@@ -337,6 +354,9 @@ export default function ComicDetailPage() {
             ) : (
               filteredChapters.map((ch) => {
                 const isRead = readChapterIds.has(ch.id) || readChapterNumbers.has(ch.chapter_number);
+                const matchingAdaptation = adaptations.find(
+                  (a) => ch.chapter_number >= a.start_chapter && ch.chapter_number <= a.end_chapter
+                );
                 return (
                   <Link
                     key={ch.id}
@@ -349,9 +369,21 @@ export default function ComicDetailPage() {
                         {ch.chapter_number}
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-xs sm:text-sm font-black text-[#1A1A1A] truncate">
-                          Chapter {ch.chapter_number}
-                        </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs sm:text-sm font-black text-[#1A1A1A] truncate">
+                            Chapter {ch.chapter_number}
+                          </span>
+                          {matchingAdaptation && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EBF3FE] border border-[#1A1A1A] text-[9px] font-black text-[#2A4FCB]">
+                              <Film className="w-2.5 h-2.5" />
+                              <span>
+                                {matchingAdaptation.anime_season || matchingAdaptation.anime_episode_range
+                                  ? (matchingAdaptation.anime_season || 'Anime')
+                                  : (matchingAdaptation.novel_chapter_range ? `Novel Ch.${matchingAdaptation.novel_chapter_range}` : 'Adaptasi')}
+                              </span>
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] text-[#7A756D]">
                           {formatRelativeTime(ch.released_at)}
                         </span>
@@ -374,6 +406,12 @@ export default function ComicDetailPage() {
             )}
           </div>
         </div>
+
+        {/* 5. Related Comics, Franchise & Recommendations */}
+        <RelatedComicsSection
+          comicSlug={slug}
+          comicTitle={comic.title}
+        />
       </div>
     </div>
   );
