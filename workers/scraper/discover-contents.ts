@@ -4,7 +4,7 @@ import {
   parseWestmangaContentsHTML,
   buildContentsUrl,
   DiscoveredComicSource,
-} from '../../lib/scrapers/westmanga-contents';
+} from './westmanga-contents';
 
 async function runDiscoverSourcesWorker() {
   console.log('====================================================');

@@ -5,7 +5,7 @@ import {
   scrapeChapterPageWithPuppeteer,
 } from './parse-source';
 import { fetchComicMetadata, syncWorkerComicGenres } from '../lib/comic-metadata';
-import { parseWestmangaContentsHTML } from '../../lib/scrapers/westmanga-contents';
+import { parseWestmangaContentsHTML } from './westmanga-contents';
 
 async function runScraperWorker() {
   console.log('[Scraper Worker] Starting ingestion run...');
