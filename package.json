@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "scrape": "npm run scrape --prefix workers",
+    "discover-sources": "npm run discover-sources --prefix workers",
     "process-images": "npm run process-images --prefix workers",
     "repair-queue": "npm run repair-queue --prefix workers",
     "enrich-comics": "npx ts-node --project workers/tsconfig.json workers/scraper/enrich-all.ts",
@@ -16,6 +17,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.1",
+    "cheerio": "^1.2.0",
     "clsx": "^2.1.1",
     "imagekit": "^6.0.0",
     "lucide-react": "^0.475.0",

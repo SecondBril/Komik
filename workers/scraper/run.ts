@@ -5,6 +5,7 @@ import {
   scrapeChapterPageWithPuppeteer,
 } from './parse-source';
 import { fetchComicMetadata, syncWorkerComicGenres } from '../lib/comic-metadata';
+import { parseWestmangaContentsHTML } from '../../lib/scrapers/westmanga-contents';
 
 async function runScraperWorker() {
   console.log('[Scraper Worker] Starting ingestion run...');
@@ -48,7 +49,56 @@ async function runScraperWorker() {
       console.log(`\n==================================================`);
       console.log(`[Scraper Worker] Checking source: ${source.name} (${source.base_url})`);
 
-      // Discover comic details & all available chapters on the page
+      // If source points to a catalog/contents listing page (e.g. https://v1.westmanga.my/contents)
+      if (source.base_url.includes('/contents')) {
+        console.log(`[Scraper Worker] Source is a Catalog/Contents URL! Discovering comics from ${source.base_url}...`);
+        try {
+          const catPage = await browser.newPage();
+          await catPage.goto(source.base_url, { waitUntil: 'networkidle2', timeout: 35000 }).catch(() => {});
+          try {
+            await catPage.waitForSelector('a[href*="/comic/"]', { timeout: 10000 });
+          } catch {
+            await new Promise((r) => setTimeout(r, 4000));
+          }
+
+          const catHtml = await catPage.content();
+          await catPage.close();
+
+          const discovered = parseWestmangaContentsHTML(catHtml, 'https://v1.westmanga.my');
+          console.log(`[Scraper Worker] Found ${discovered.length} comics on ${source.base_url}`);
+
+          // Fetch existing sources to avoid duplicates
+          const { data: currentSources } = await supabase.from('sources').select('base_url');
+          const existingSet = new Set((currentSources || []).map((s) => s.base_url.toLowerCase().replace(/\/$/, '')));
+
+          const newComics = discovered.filter((c) => !existingSet.has(c.comicUrl.toLowerCase().replace(/\/$/, '')));
+          if (newComics.length > 0) {
+            console.log(`[Scraper Worker] Registering ${newComics.length} new comics as individual sources...`);
+            await supabase.from('sources').insert(
+              newComics.map((c) => ({
+                name: c.title,
+                base_url: c.comicUrl,
+                is_active: true,
+                scraping_config: {
+                  comic_slug: c.slug,
+                  comic_type: c.type,
+                  cover_url: c.coverUrl,
+                  latest_chapter: c.latestChapter?.chapterNumber,
+                  selector_title: '.entry-title',
+                  selector_images: '#readerarea img',
+                },
+              }))
+            );
+          } else {
+            console.log(`[Scraper Worker] All comics on ${source.base_url} already registered as sources.`);
+          }
+        } catch (catErr: any) {
+          console.error(`[Scraper Worker] Failed to scan catalog ${source.base_url}:`, catErr.message);
+        }
+        continue; // Catalog processed, proceed to next source
+      }
+
+      // Discover comic details & all available chapters on the single comic page
       const comicDetail = await getComicDetailWithPuppeteer(browser, source.base_url);
       if (!comicDetail || comicDetail.chapters.length === 0) {
         console.warn(`[Scraper Worker] Could not extract chapter list from ${source.base_url}. Skipping.`);

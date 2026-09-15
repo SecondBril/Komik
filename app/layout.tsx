@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { SecretEightClickListener } from '@/components/mature/SecretEightClickListener';
 
 export const metadata: Metadata = {
   title: 'KomikIndo — Baca Manga, Manhwa, Manhua Bahasa Indonesia Cepat & Tanpa Lag',
@@ -37,6 +38,7 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-[#0F1115] text-[#F2F3F5] antialiased selection:bg-[#7C5CFC]/30 selection:text-white min-h-screen flex flex-col">
+        <SecretEightClickListener />
         {children}
       </body>
     </html>

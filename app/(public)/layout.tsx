@@ -39,9 +39,8 @@ export default function PublicLayout({
           </p>
           <div className="flex items-center gap-4 font-bold text-[#1A1A1A]">
             <Link href="/" className="hover:text-[#2E7D6E]">Beranda</Link>
-            <Link href="/browse" className="hover:text-[#2E7D6E]">Categories</Link>
-            <Link href="/history" className="hover:text-[#2E7D6E]">Favorites & Bag</Link>
-            <Link href="/login" className="hover:text-[#2E7D6E]">Log in</Link>
+            <Link href="/browse" className="hover:text-[#2E7D6E]">Komik</Link>
+            <Link href="/history" className="hover:text-[#2E7D6E]">Riwayat</Link>
           </div>
         </div>
       </footer>

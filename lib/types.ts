@@ -139,3 +139,58 @@ export interface ComicStaff {
   role: string;
 }
 
+export type GoreLevel = 'Moderate' | 'High' | 'Extreme';
+
+export interface MatureGenre {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+}
+
+export interface MatureComic {
+  id: string;
+  slug: string;
+  title: string;
+  alt_titles: string[];
+  type: ComicType;
+  synopsis: string;
+  cover_url: string;
+  author: string;
+  status: ComicStatus;
+  rating: number;
+  gore_level: GoreLevel;
+  content_warnings: string[];
+  age_restriction: number;
+  source_id?: string;
+  created_at: string;
+  updated_at: string;
+  genres?: MatureGenre[];
+  latest_chapter?: {
+    id: string;
+    chapter_number: number;
+    title?: string;
+    released_at: string;
+  };
+}
+
+export interface MatureChapter {
+  id: string;
+  comic_id: string;
+  chapter_number: number;
+  title?: string;
+  status: ChapterStatus;
+  released_at: string;
+  created_at: string;
+  comic?: MatureComic;
+}
+
+export interface MatureFilterState {
+  type?: ComicType | 'all';
+  status?: ComicStatus | 'all';
+  genres: number[];
+  gore_level?: 'all' | GoreLevel;
+  query?: string;
+  sort?: 'latest' | 'popular' | 'rating' | 'title';
+}
+
