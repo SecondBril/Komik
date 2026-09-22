@@ -12,7 +12,7 @@ jobs:
   sync-catalog:
     name: Sync Comic Metadata & New Chapters
     runs-on: ubuntu-latest
-    timeout-minutes: 30 # Cepat dan efisien karena TIDAK menyimpan gambar ke database
+    timeout-minutes: 360 # Cepat dan efisien karena TIDAK menyimpan gambar ke database
 
     steps:
       - name: Checkout Repository
