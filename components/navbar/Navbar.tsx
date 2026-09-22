@@ -18,12 +18,14 @@ export const Navbar: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Comic[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isUserLoggedIn, setIsUserLoggedIn] = useState(false);
   const [userProfile, setUserProfile] = useState<{ name: string; email: string; avatar: string } | null>(null);
   const [toastMessage, setToastMessage] = useState('');
   const [isToastOpen, setIsToastOpen] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const mobileSearchContainerRef = useRef<HTMLDivElement>(null);
 
   // Sync Supabase Auth session & local storage
   useEffect(() => {
@@ -103,7 +105,10 @@ export const Navbar: React.FC = () => {
   // Click outside listener
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedInsideDesktop = searchContainerRef.current && searchContainerRef.current.contains(target);
+      const clickedInsideMobile = mobileSearchContainerRef.current && mobileSearchContainerRef.current.contains(target);
+      if (!clickedInsideDesktop && !clickedInsideMobile) {
         setIsSearchOpen(false);
       }
     }
@@ -115,6 +120,7 @@ export const Navbar: React.FC = () => {
     e.preventDefault();
     if (searchQuery.trim()) {
       setIsSearchOpen(false);
+      setIsMobileSearchOpen(false);
       router.push(`/browse?q=${encodeURIComponent(searchQuery.trim())}`);
     }
   };
@@ -227,7 +233,22 @@ export const Navbar: React.FC = () => {
               <span>History</span>
             </Link>
 
-            {/* Login / Profile Button - Shown on ALL screens (on mobile this is the only action next to logo) */}
+            {/* Mobile Search Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setIsMobileSearchOpen((prev) => !prev)}
+              className="md:hidden w-8 h-8 rounded-full bg-white border-2 border-[#1A1A1A] flex items-center justify-center text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              aria-label="Cari Komik"
+              title="Cari Komik"
+            >
+              {isMobileSearchOpen ? (
+                <X className="w-4 h-4 stroke-[2.5]" />
+              ) : (
+                <Search className="w-4 h-4 stroke-[2.5]" />
+              )}
+            </button>
+
+            {/* Login / Profile Button - Shown on ALL screens */}
             {isUserLoggedIn ? (
               <button
                 onClick={handleLogout}
@@ -235,13 +256,13 @@ export const Navbar: React.FC = () => {
                 title="Keluar dari akun"
               >
                 <User className="w-3.5 h-3.5" />
-                <span className="truncate max-w-[135px] sm:max-w-[110px]">{userProfile?.name}</span>
+                <span className="truncate max-w-[110px] sm:max-w-[135px]">{userProfile?.name}</span>
                 <LogOut className="w-3 h-3 text-[#E96379]" />
               </button>
             ) : (
               <button
                 onClick={() => setIsAuthModalOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#2A4FCB] hover:bg-[#203EA5] text-white border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 rounded-full bg-[#2A4FCB] hover:bg-[#203EA5] text-white border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all"
               >
                 <User className="w-3.5 h-3.5" />
                 <span>Log in</span>
@@ -249,6 +270,74 @@ export const Navbar: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Mobile Search Expandable Bar & Dropdown */}
+        {isMobileSearchOpen && (
+          <div
+            ref={mobileSearchContainerRef}
+            className="md:hidden max-w-6xl mx-auto px-4 pt-2.5 pb-1 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-200"
+          >
+            <form onSubmit={handleSearchSubmit} className="relative w-full">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari judul komik, karakter..."
+                autoFocus
+                className="w-full bg-white border-2 border-[#1A1A1A] rounded-2xl py-2 pl-9 pr-8 text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-[2px_2px_0px_#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#1A1A1A] stroke-[2.5]" />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8C8C8C] hover:text-[#1A1A1A]"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </form>
+
+            {/* Quick Live Search Dropdown for Mobile */}
+            {isSearchOpen && (
+              <div className="bg-white rounded-2xl border-2 border-[#1A1A1A] shadow-[4px_4px_0px_#1A1A1A] overflow-hidden p-2 flex flex-col gap-1 max-h-72 overflow-y-auto z-50">
+                {isSearching ? (
+                  <div className="p-3 text-center text-xs font-bold text-[#7A756D]">
+                    Mencari komik di database...
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="p-3 text-center text-xs font-bold text-[#7A756D]">
+                    Tidak ditemukan komik dengan judul &quot;{searchQuery}&quot;
+                  </div>
+                ) : (
+                  searchResults.map((c) => (
+                    <Link
+                      key={c.id}
+                      href={`/komik/${c.slug}`}
+                      onClick={() => {
+                        setIsSearchOpen(false);
+                        setIsMobileSearchOpen(false);
+                      }}
+                      className="flex items-center gap-2.5 p-2 rounded-xl hover:bg-[#FAF7F0] active:bg-[#FAF7F0] transition-colors"
+                    >
+                      <div className="relative w-9 h-12 rounded-lg overflow-hidden shrink-0 border border-[#1A1A1A] bg-[#FAF7F0]">
+                        <Image src={c.cover_url} alt={c.title} fill className="object-cover" />
+                      </div>
+                      <div className="flex flex-col flex-1 truncate">
+                        <span className="text-xs font-black text-[#1A1A1A] truncate">
+                          {c.title}
+                        </span>
+                        <span className="text-[10px] text-[#7A756D]">
+                          Ch. {c.latest_chapter?.chapter_number || 1} • {c.type.toUpperCase()} • Rating {c.rating.toFixed(1)}
+                        </span>
+                      </div>
+                    </Link>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Google Auth Modal */}

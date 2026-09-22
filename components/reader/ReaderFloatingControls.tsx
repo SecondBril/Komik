@@ -39,7 +39,54 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
   totalPages,
 }) => {
   const [isSpeedOpen, setIsSpeedOpen] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const lastScrollY = useRef(0);
+
+  // ── Auto-hide on scroll down, show on scroll up (only when NOT auto-scrolling) ──
+  useEffect(() => {
+    // If auto-scroll is actively playing, ALWAYS keep the controls visible so user can pause
+    if (isAutoScrolling) {
+      setIsVisible(true);
+      return;
+    }
+
+    let ticking = false;
+    const handleScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const currentScrollY = window.scrollY || document.documentElement.scrollTop;
+          const diff = currentScrollY - lastScrollY.current;
+
+          // Don't hide if user is currently dragging the dock
+          if (dragRef.current.active) {
+            lastScrollY.current = Math.max(0, currentScrollY);
+            ticking = false;
+            return;
+          }
+
+          // Trigger hide/show based on scroll direction with a 10px threshold
+          if (Math.abs(diff) > 10) {
+            if (currentScrollY > 80 && diff > 0) {
+              // Scrolling DOWN: hide dock & close speed popover
+              setIsVisible(false);
+              setIsSpeedOpen(false);
+            } else if (diff < 0) {
+              // Scrolling UP: reveal dock
+              setIsVisible(true);
+            }
+          }
+
+          lastScrollY.current = Math.max(0, currentScrollY);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [isAutoScrolling]);
 
   // ── Drag state (Pointer Events — responsive with capture) ──────────────────
   const [pos, setPos] = useState<{ right: number; bottom: number }>({ right: 16, bottom: 88 });
@@ -85,7 +132,6 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
     (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
   };
 
-
   // ── Close speed popover on click outside ───────────────────────────────────
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -129,7 +175,11 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
     <aside
       aria-label="Kontrol Navigasi & Auto-Scroll Pembaca"
       style={{ right: pos.right, bottom: pos.bottom }}
-      className="fixed z-40 flex flex-col items-center select-none"
+      className={`fixed z-40 flex flex-col items-center select-none transition-all duration-300 ease-in-out ${
+        isVisible || isAutoScrolling
+          ? 'opacity-100 translate-y-0 pointer-events-auto'
+          : 'opacity-0 translate-y-12 pointer-events-none'
+      }`}
       onClick={(e) => e.stopPropagation()}
     >
       {/* Speed Configuration Popover — only when NOT auto-scrolling */}

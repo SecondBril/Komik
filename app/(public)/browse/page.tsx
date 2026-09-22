@@ -257,7 +257,28 @@ function BrowseContent() {
             })}
           </div>
 
-          {/* Right: Sort selector & Search bar */}
+          {/* Middle: Search input box */}
+          <div className="relative flex-1 min-w-[170px]">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari judul komik..."
+              className="w-full py-2 pl-9 pr-8 rounded-2xl bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
+            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#1A1A1A] stroke-[2.5]" />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8C8C8C] hover:text-[#1A1A1A]"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Right: Sort selector & Filter button */}
           <div className="flex items-center gap-2">
             <select
               value={activeSort}
@@ -495,6 +516,32 @@ function BrowseContent() {
             </div>
 
             <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4">
+              {/* Cari Kata Kunci */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-black text-[#1A1A1A] uppercase tracking-wider">
+                  Cari Judul / Karakter
+                </span>
+                <div className="relative w-full">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Ketik judul komik..."
+                    className="w-full py-2.5 pl-9 pr-8 rounded-xl bg-white border-2 border-[#1A1A1A] text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
+                  />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#1A1A1A] stroke-[2.5]" />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8C8C8C] hover:text-[#1A1A1A]"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Tipe Komik */}
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-black text-[#1A1A1A] uppercase tracking-wider">
