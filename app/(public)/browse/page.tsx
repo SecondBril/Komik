@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ComicCard } from '@/components/comic/ComicCard';
 import { DecorativeBlobs } from '@/components/ui/DecorativeBlobs';
-import { Search, ArrowLeft, Settings, ArrowRight, X, Sparkles, Filter, SlidersHorizontal, Check } from 'lucide-react';
+import { Search, ArrowLeft, Settings, ArrowRight, X, Sparkles, Filter, SlidersHorizontal, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { Genre, Comic } from '@/lib/types';
 import { MOCK_COMICS, MOCK_GENRES } from '@/lib/mock-data';
 
@@ -45,11 +45,28 @@ function BrowseContent() {
   );
   const [searchQuery, setSearchQuery] = useState(queryParam);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
 
   const [genres, setGenres] = useState<{ id: number; name: string; slug: string; count?: number }[]>([]);
   const [comics, setComics] = useState<Comic[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
+
+  // Sort genres by real comic count descending
+  const sortedGenres = useMemo(() => {
+    return [...genres].sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+  }, [genres]);
+
+  // Top 9 categories to display initially (3 rows of 3 columns, visually balanced)
+  // Ensure any selected genre that might be beyond top 9 is included in the display
+  const displayedGenres = useMemo(() => {
+    if (isCategoriesExpanded) return sortedGenres;
+    const top9 = sortedGenres.slice(0, 9);
+    const missingSelected = sortedGenres.filter(
+      (g) => selectedGenres.includes(g.slug) && !top9.some((t) => t.slug === g.slug)
+    );
+    return [...top9, ...missingSelected];
+  }, [sortedGenres, isCategoriesExpanded, selectedGenres]);
 
   // Fetch real genres with actual counts
   useEffect(() => {
@@ -310,7 +327,7 @@ function BrowseContent() {
           </div>
         )}
 
-        {/* 3. Section "Categories" - Responsive Grid with Real Comic Counts */}
+        {/* 3. Section "Categories" - Top 9 Kategori Terpopuler + Expand/Collapse */}
         <section className="flex flex-col gap-3.5">
           <div className="flex items-center justify-between border-b-2 border-[#1A1A1A] pb-2">
             <div className="flex items-center gap-2">
@@ -318,22 +335,34 @@ function BrowseContent() {
                 Categories
               </h2>
               <span className="text-[10px] sm:text-xs font-extrabold text-[#7A756D]">
-                (Klik untuk memilih multi-kategori)
+                {isCategoriesExpanded
+                  ? `(Semua ${sortedGenres.length} Kategori)`
+                  : `(Top 9 Terpopuler)`}
               </span>
             </div>
-            {selectedGenres.length > 0 && (
+            
+            <div className="flex items-center gap-3">
+              {selectedGenres.length > 0 && (
+                <button
+                  onClick={() => setSelectedGenres([])}
+                  className="text-xs font-black text-[#2E7D6E] underline shrink-0"
+                >
+                  Hapus Pilihan ({selectedGenres.length})
+                </button>
+              )}
               <button
-                onClick={() => setSelectedGenres([])}
-                className="text-xs font-black text-[#2E7D6E] underline shrink-0"
+                onClick={() => setIsFilterDrawerOpen(true)}
+                className="hidden sm:inline-flex items-center gap-1 text-xs font-bold text-[#7A756D] hover:text-[#1A1A1A] hover:underline"
               >
-                Hapus Pilihan ({selectedGenres.length})
+                <SlidersHorizontal className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Buka Filter Modal</span>
               </button>
-            )}
+            </div>
           </div>
 
           {/* Terkunci 3 Kolom di Semua Ukuran Layar */}
           <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
-            {genres.map((cat) => {
+            {displayedGenres.map((cat) => {
               const isSelected = selectedGenres.includes(cat.slug);
               return (
                 <button
@@ -373,6 +402,36 @@ function BrowseContent() {
               );
             })}
           </div>
+
+          {/* Tombol Lihat Lebih Banyak / Lebih Sedikit */}
+          {sortedGenres.length > 9 && (
+            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+              <button
+                onClick={() => setIsCategoriesExpanded((prev) => !prev)}
+                className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-full bg-white hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] flex items-center gap-1.5 active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              >
+                {isCategoriesExpanded ? (
+                  <>
+                    <ChevronUp className="w-4 h-4 stroke-[2.5]" />
+                    <span>Tampilkan Lebih Sedikit (Top 9)</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-4 h-4 stroke-[2.5]" />
+                    <span>Lihat Lebih Banyak (+{sortedGenres.length - 9} Kategori Lainnya)</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => setIsFilterDrawerOpen(true)}
+                className="px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full bg-[#FAF7F0] hover:bg-white border-2 border-[#1A1A1A] text-xs font-bold text-[#7A756D] hover:text-[#1A1A1A] flex items-center gap-1.5 transition-all shadow-sm"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Buka di Filter Modal</span>
+              </button>
+            </div>
+          )}
         </section>
 
         {/* 4. Comics Results List - Responsive Grid */}
