@@ -31,7 +31,7 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Run Auto-Sync Catalog & Chapters (No Images to DB)
+      - name: Run Auto-Sync Catalog & Real Chapter Images
         run: npm run sync-comics
         env:
           PUPPETEER_EXECUTABLE_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}

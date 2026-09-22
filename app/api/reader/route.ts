@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { checkDailyRateLimit } from '@/lib/rate-limiter';
 import { scrapeLiveChapterPages } from '@/lib/scraper/live-chapter-scraper';
-import { MOCK_COMICS, MOCK_CHAPTERS, MOCK_PAGES } from '@/lib/mock-data';
+import { MOCK_COMICS, MOCK_CHAPTERS } from '@/lib/mock-data';
 
 // GET /api/reader?slug=xxx&chapter=1
 export async function GET(req: NextRequest) {
@@ -119,31 +119,53 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // 4. ON-DEMAND LIVE SCRAPING GAMBAR DARI WESTMANGA (TIDAK DISIMPAN DI DATABASE)
-  let pages = await scrapeLiveChapterPages(slug, chapterNumber, currentChapter.id);
-
-  // Fallback 1: Jika live scraping tidak mengembalikan hasil, cek apakah ada di tabel legacy chapter_pages
-  if (pages.length === 0 && supabase && currentChapter?.id) {
+  // 4. Ambil gambar asli dari database Supabase (super cepat 10-30ms)
+  let pages: any[] = [];
+  if (supabase && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
     try {
-      const { data: legacyPages } = await supabase
+      const { data: dbPages, error: dbPagesErr } = await supabase
         .from('chapter_pages')
         .select('id, chapter_id, page_number, image_url, width, height')
         .eq('chapter_id', currentChapter.id)
         .order('page_number', { ascending: true });
 
-      if (legacyPages && legacyPages.length > 0) {
-        pages = legacyPages as any;
+      if (dbPages && dbPages.length > 0 && !dbPagesErr) {
+        pages = dbPages;
       }
-    } catch {
-      // Abaikan fallback error
+    } catch (err: any) {
+      console.warn('[Reader API] Error fetching chapter_pages from DB:', err?.message);
     }
   }
 
-  // Fallback 2: Mock data jika di environment lokal/test
+  // 5. On-Demand Live Scraping: Jika di database belum ada gambar, ambil dari Westmanga
   if (pages.length === 0) {
-    const mockPages = MOCK_PAGES[currentChapter.id] || MOCK_PAGES['ch-101'] || [];
-    pages = mockPages;
+    try {
+      const livePages = await scrapeLiveChapterPages(slug, chapterNumber, currentChapter.id);
+      if (livePages && livePages.length > 0) {
+        pages = livePages;
+
+        // Auto-cache ke database Supabase (chapter_pages) agar pembaca berikutnya langsung membaca dari DB
+        if (supabase && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
+          try {
+            const rowsToInsert = livePages.map((p, idx) => ({
+              chapter_id: currentChapter.id,
+              page_number: p.page_number || idx + 1,
+              image_url: p.image_url,
+            }));
+            await supabase.from('chapter_pages').upsert(rowsToInsert, { onConflict: 'chapter_id,page_number' });
+            console.log(`[Reader API] Auto-cached ${rowsToInsert.length} pages to DB for chapter ${currentChapter.id}`);
+          } catch (cacheErr: any) {
+            console.warn('[Reader API] Failed to auto-cache pages to DB:', cacheErr?.message);
+          }
+        }
+      }
+    } catch (scrapeErr: any) {
+      console.warn('[Reader API] Live scraping error:', scrapeErr?.message);
+    }
   }
+
+  // CATATAN: Fallback MOCK_PAGES (gambar dummy Unsplash) telah DIHAPUS.
+  // Jika gambar belum ada, pages akan tetap [] agar UI menampilkan state kosong yang bersih dan valid.
 
   // Berikan respons dengan header rate limiting
   return NextResponse.json(

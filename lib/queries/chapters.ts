@@ -1,5 +1,5 @@
 import { Chapter, ChapterPage } from '../types';
-import { MOCK_CHAPTERS, MOCK_PAGES, MOCK_COMICS } from '../mock-data';
+import { MOCK_CHAPTERS, MOCK_COMICS } from '../mock-data';
 import { createServerSupabaseClient } from '../supabase/server';
 import { createClient } from '../supabase/client';
 
@@ -87,5 +87,5 @@ export async function getChapterPages(chapterId: string): Promise<ChapterPage[]>
     }
   }
 
-  return MOCK_PAGES[chapterId] || MOCK_PAGES['ch-101'] || [];
+  return [];
 }

@@ -100,12 +100,120 @@ async function fetchComicChapters(browser, slug) {
   }
 }
 
+async function fetchChapterPages(browser, comicSlug, chapterNumber) {
+  if (!browser) return [];
+  const page = await browser.newPage();
+  const capturedImages = [];
+  const seenUrls = new Set();
 
+  try {
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const url = req.url();
+      const type = req.resourceType();
+      if (
+        type === 'font' ||
+        url.includes('google') ||
+        url.includes('cloudflareinsights') ||
+        url.includes('histats') ||
+        url.includes('0ads')
+      ) {
+        req.abort().catch(() => {});
+      } else {
+        req.continue().catch(() => {});
+      }
+    });
+
+    page.on('response', async (res) => {
+      const url = res.url();
+      if (
+        res.status() === 200 &&
+        res.request().method() === 'GET' &&
+        url.includes('data.mantweh.online/api/v/')
+      ) {
+        try {
+          const json = await res.json();
+          if (json.data?.images && Array.isArray(json.data.images)) {
+            json.data.images.forEach((imgUrl) => {
+              if (
+                imgUrl &&
+                typeof imgUrl === 'string' &&
+                imgUrl.includes('storage.westmanga.blog/west/') &&
+                !imgUrl.includes('/0ads/') &&
+                !imgUrl.includes('logo') &&
+                !seenUrls.has(imgUrl)
+              ) {
+                seenUrls.add(imgUrl);
+                capturedImages.push(imgUrl);
+              }
+            });
+          }
+        } catch {}
+      }
+    });
+
+    const candidateSlugs = [
+      `${comicSlug}-chapter-${chapterNumber}`,
+      `${comicSlug}-chapter-${String(chapterNumber).padStart(2, '0')}`,
+      `${comicSlug}-chapter-${chapterNumber}-bahasa-indonesia`,
+      `${comicSlug}-chapter-${String(chapterNumber).padStart(2, '0')}-bahasa-indonesia`,
+    ];
+
+    for (const chSlug of candidateSlugs) {
+      const targetUrl = `https://v1.westmanga.my/view/${chSlug}`;
+      try {
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        const start = Date.now();
+        while (capturedImages.length === 0 && Date.now() - start < 3500) {
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        if (capturedImages.length > 0) break;
+
+        const domImages = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('img'))
+            .map((img) => img.src || img.getAttribute('data-src') || '')
+            .filter((src) => src.includes('storage.westmanga.blog/west/'));
+        });
+
+        if (domImages.length > 0) {
+          domImages.forEach((imgUrl) => {
+            if (!seenUrls.has(imgUrl) && !imgUrl.includes('/0ads/') && !imgUrl.includes('logo')) {
+              seenUrls.add(imgUrl);
+              capturedImages.push(imgUrl);
+            }
+          });
+          if (capturedImages.length > 0) break;
+        }
+      } catch {}
+    }
+
+    return capturedImages;
+  } catch (err) {
+    return [];
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function saveChapterPagesToDb(supabase, chapterId, images) {
+  if (!images || images.length === 0) return 0;
+  const pageRows = images.map((url, idx) => ({
+    chapter_id: chapterId,
+    page_number: idx + 1,
+    image_url: url,
+  }));
+  const { error } = await supabase.from('chapter_pages').upsert(pageRows, { onConflict: 'chapter_id,page_number' });
+  if (error) {
+    console.warn(`       ⚠️ Gagal menyimpan chapter_pages:`, error.message);
+    return 0;
+  }
+  return pageRows.length;
+}
 
 async function runCliSync() {
   console.log('=====================================================');
-  console.log('  WESTMANGA AUTO-SYNC (DYNAMIC CATALOG & CHAPTERS)   ');
-  console.log('  TIDAK MENYIMPAN GAMBAR CHAPTER DI DATABASE         ');
+  console.log('  WESTMANGA AUTO-SYNC (CATALOG, CHAPTERS & IMAGES)   ');
+  console.log('  MENYIMPAN GAMBAR ASLI KE Supabase (chapter_pages)  ');
   console.log('=====================================================\n');
 
   const chromePath = getChromeExecutablePath();
@@ -305,19 +413,41 @@ async function runCliSync() {
                 status: 'published',
                 released_at: new Date().toISOString(),
               }));
-              await supabase.from('chapters').upsert(rows, { onConflict: 'comic_id,chapter_number' });
+              const { data: insertedChs } = await supabase
+                .from('chapters')
+                .upsert(rows, { onConflict: 'comic_id,chapter_number' })
+                .select('id, chapter_number');
               newChapters += chapters.length;
               console.log(`     ✓ Mendaftarkan ${chapters.length} chapter (semua chapter tampil di web).`);
+
+              // Ekstrak gambar asli untuk chapter terbaru agar pembaca langsung bisa membaca
+              const targetCh = item.latestChapter?.chapterNumber || chapters[0]?.chapter_number;
+              const matchingCh = (insertedChs || []).find((c) => c.chapter_number === targetCh) || insertedChs?.[0];
+              if (matchingCh && browser) {
+                const images = await fetchChapterPages(browser, item.slug, matchingCh.chapter_number);
+                if (images.length > 0) {
+                  await saveChapterPagesToDb(supabase, matchingCh.id, images);
+                  console.log(`     ✓ Menyimpan ${images.length} gambar asli ke chapter_pages untuk Chapter ${matchingCh.chapter_number}`);
+                }
+              }
             } else if (item.latestChapter?.chapterNumber) {
-              await supabase.from('chapters').insert({
+              const { data: newCh } = await supabase.from('chapters').insert({
                 comic_id: comicId,
                 chapter_number: item.latestChapter.chapterNumber,
                 title: item.latestChapter.title || `Chapter ${item.latestChapter.chapterNumber}`,
                 status: 'published',
                 released_at: new Date().toISOString(),
-              });
+              }).select('id, chapter_number').single();
               newChapters++;
               console.log(`     ✓ Chapter terbaru didaftarkan: Chapter ${item.latestChapter.chapterNumber}`);
+
+              if (newCh && browser) {
+                const images = await fetchChapterPages(browser, item.slug, newCh.chapter_number);
+                if (images.length > 0) {
+                  await saveChapterPagesToDb(supabase, newCh.id, images);
+                  console.log(`     ✓ Menyimpan ${images.length} gambar asli ke chapter_pages untuk Chapter ${newCh.chapter_number}`);
+                }
+              }
             }
           }
         } else {
@@ -396,15 +526,37 @@ async function runCliSync() {
 
             if (!chExist) {
               console.log(`   + Chapter baru untuk "${existing.title}": Chapter ${chNum}`);
-              await supabase.from('chapters').insert({
+              const { data: newCh } = await supabase.from('chapters').insert({
                 comic_id: existing.id,
                 chapter_number: chNum,
                 title: item.latestChapter.title || `Chapter ${chNum}`,
                 status: 'published',
                 released_at: new Date().toISOString(),
-              });
+              }).select('id').single();
               newChapters++;
               await supabase.from('comics').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
+
+              if (newCh?.id && browser) {
+                const images = await fetchChapterPages(browser, item.slug, chNum);
+                if (images.length > 0) {
+                  await saveChapterPagesToDb(supabase, newCh.id, images);
+                  console.log(`     ✓ Menyimpan ${images.length} gambar asli ke chapter_pages untuk Chapter ${chNum}`);
+                }
+              }
+            } else if (browser) {
+              // Auto-backfill: jika chapter sudah ada di DB tapi gambar di chapter_pages masih 0
+              const { count: pagesCount } = await supabase
+                .from('chapter_pages')
+                .select('id', { count: 'exact', head: true })
+                .eq('chapter_id', chExist.id);
+
+              if (!pagesCount || pagesCount === 0) {
+                const images = await fetchChapterPages(browser, item.slug, chNum);
+                if (images.length > 0) {
+                  await saveChapterPagesToDb(supabase, chExist.id, images);
+                  console.log(`     ✓ Auto-backfill: Menyimpan ${images.length} gambar asli ke chapter_pages untuk Chapter ${chNum}`);
+                }
+              }
             }
           }
         }
