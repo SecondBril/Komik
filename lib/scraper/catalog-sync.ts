@@ -351,3 +351,100 @@ export async function syncWestmangaComics(options: { maxPages?: number } = {}): 
 
   return stats;
 }
+
+/**
+ * Sync single comic details and all chapters on-demand
+ */
+export async function syncSingleComic(slug: string): Promise<{
+  success: boolean;
+  comic?: any;
+  chaptersCount?: number;
+  error?: string;
+}> {
+  const supabase = createAdminClient();
+  if (!supabase) {
+    return { success: false, error: 'Database admin connection not available' };
+  }
+
+  const chromePath = getChromeExecutablePath();
+  if (!chromePath) {
+    return { success: false, error: 'Chrome executable not found on server' };
+  }
+
+  let browser: Browser | null = null;
+  try {
+    browser = await puppeteer.launch({
+      executablePath: chromePath,
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
+    });
+
+    const comicUrl = `https://v1.westmanga.my/comic/${slug}`;
+    const detail = await extractComicDetailWithPuppeteer(browser, comicUrl, slug);
+    if (!detail) {
+      return { success: false, error: `Comic ${slug} not found on source` };
+    }
+
+    // Check or insert comic
+    let { data: comic } = await supabase
+      .from('comics')
+      .select('id, title, slug')
+      .eq('slug', slug)
+      .maybeSingle();
+
+    if (!comic) {
+      const meta = await fetchComicMetadata(detail.title).catch(() => null);
+      const { data: newComic, error: createErr } = await supabase
+        .from('comics')
+        .insert({
+          slug,
+          title: meta?.title || detail.title,
+          type: (meta?.type as any) || detail.type || 'manhwa',
+          synopsis: meta?.synopsis || detail.synopsis,
+          cover_url: meta?.cover_url || detail.coverUrl,
+          author: meta?.author || 'Unknown Author',
+          rating: meta?.rating || 4.5,
+          status: (meta?.status as any) || 'ongoing',
+        })
+        .select('id, title, slug')
+        .single();
+
+      if (createErr || !newComic) {
+        return { success: false, error: createErr?.message || 'Failed creating comic' };
+      }
+      comic = newComic;
+
+      if (meta?.genres && meta.genres.length > 0) {
+        await syncWorkerComicGenres(supabase, comic.id, meta.genres).catch(() => {});
+      }
+    }
+
+    // Upsert chapters
+    if (detail.chapters.length > 0) {
+      const chaptersToInsert = detail.chapters.map((ch) => ({
+        comic_id: comic.id,
+        chapter_number: ch.chapterNumber,
+        title: ch.title,
+        status: 'published',
+        released_at: new Date().toISOString(),
+      }));
+
+      await supabase
+        .from('chapters')
+        .upsert(chaptersToInsert, { onConflict: 'comic_id, chapter_number', ignoreDuplicates: true });
+    }
+
+    return {
+      success: true,
+      comic,
+      chaptersCount: detail.chapters.length,
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Single comic sync failed' };
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+

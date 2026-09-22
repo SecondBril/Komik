@@ -20,7 +20,6 @@ export async function getLatestChapters(limit = 12): Promise<Chapter[]> {
           *,
           comic:comics(*)
         `)
-        .eq('status', 'published')
         .order('released_at', { ascending: false })
         .limit(limit);
 
@@ -54,7 +53,6 @@ export async function getComicChapters(comicSlug: string): Promise<Chapter[]> {
           .from('chapters')
           .select('*')
           .eq('comic_id', comic.id)
-          .eq('status', 'published')
           .order('chapter_number', { ascending: false });
 
         if (!error && data) return data;

@@ -41,6 +41,7 @@ export default function ComicDetailPage() {
   const [lastReadChapterNo, setLastReadChapterNo] = useState<number | null>(null);
   const [readChapterIds, setReadChapterIds] = useState<Set<string>>(new Set());
   const [readChapterNumbers, setReadChapterNumbers] = useState<Set<number>>(new Set());
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -48,8 +49,28 @@ export default function ComicDetailPage() {
       const comicData = await getComicBySlug(slug);
       setComic(comicData);
 
-      const chapterList = await getComicChapters(slug);
+      let chapterList = await getComicChapters(slug);
       setChapters(chapterList);
+
+      // Auto-healing fallback: jika komik memiliki 0 chapter, sinkronkan langsung dari Westmanga
+      if (chapterList.length === 0) {
+        setIsSyncing(true);
+        try {
+          const syncRes = await fetch(`/api/comics/${slug}/sync`, { method: 'POST' });
+          const syncJson = await syncRes.json();
+          if (syncJson.success) {
+            const reloaded = await getComicChapters(slug);
+            if (reloaded && reloaded.length > 0) {
+              setChapters(reloaded);
+              chapterList = reloaded;
+            }
+          }
+        } catch {
+          // ignore
+        } finally {
+          setIsSyncing(false);
+        }
+      }
 
       if (comicData?.id) {
         getComicAdaptations(comicData.id).then(setAdaptations);
@@ -349,7 +370,38 @@ export default function ComicDetailPage() {
           <div className="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
             {filteredChapters.length === 0 ? (
               <div className="py-10 text-center bg-[#FAF7F0] rounded-2xl border-2 border-[#1A1A1A] p-4 font-bold text-xs text-[#7A756D]">
-                Tidak ditemukan chapter dengan nomor &quot;{chapterSearch}&quot;
+                {isSyncing ? (
+                  <div className="flex flex-col items-center gap-2 py-2">
+                    <div className="w-6 h-6 rounded-full border-2 border-[#2E7D6E] border-t-transparent animate-spin" />
+                    <span className="text-[#1A1A1A] font-extrabold">Sedang menyinkronkan daftar chapter dari Westmanga...</span>
+                    <span className="text-[11px] text-[#7A756D]">Mohon tunggu sebentar, chapter sedang diambil secara live.</span>
+                  </div>
+                ) : chapterSearch ? (
+                  `Tidak ditemukan chapter dengan nomor "${chapterSearch}"`
+                ) : (
+                  <div className="flex flex-col items-center gap-3 py-2">
+                    <span className="text-[#1A1A1A]">Belum ada chapter terdaftar untuk komik ini.</span>
+                    <button
+                      onClick={async () => {
+                        setIsSyncing(true);
+                        try {
+                          const res = await fetch(`/api/comics/${comic.slug}/sync`, { method: 'POST' });
+                          const json = await res.json();
+                          if (json.success) {
+                            const reloaded = await getComicChapters(comic.slug);
+                            if (reloaded && reloaded.length > 0) {
+                              setChapters(reloaded);
+                            }
+                          }
+                        } catch {}
+                        setIsSyncing(false);
+                      }}
+                      className="px-4 py-2 rounded-full bg-[#F6C945] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-sm hover:bg-[#EDB72B] active:scale-95 transition-transform"
+                    >
+                      Periksa & Sinkronkan Chapter
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               filteredChapters.map((ch) => {

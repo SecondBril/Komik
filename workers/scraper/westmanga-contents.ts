@@ -72,13 +72,14 @@ export function parseWestmangaContentsHTML(
       : `${siteOrigin.replace(/\/$/, '')}/${rawHref.replace(/^\//, '')}`;
 
     // Find the enclosing card container
-    // Look up for common card containers in westmanga layout
-    const parentContainer = $(el).closest('.overflow-hidden, .group, [data-slot="card"], .space-y-1').parent();
-    const cardScope = parentContainer.length > 0 ? parentContainer : $(el).closest('div');
+    // Strict card container to prevent grabbing other cards in the grid
+    const cardScope = $(el).closest('.group, .space-y-1, [data-slot="card"], .overflow-hidden');
 
     // 1. Extract Title
-    // Priority: p.font-medium, img[alt], anchor text, or slug
-    let title = cardScope.find('p.font-medium, p.font-semibold').first().text().trim();
+    let title = $(el).find('p').first().text().trim();
+    if (!title && cardScope.length > 0) {
+      title = cardScope.find('p.font-medium, p.font-semibold').first().text().trim();
+    }
     if (!title) {
       const imgAlt = cardScope.find('img[alt]').attr('alt')?.trim();
       if (imgAlt && !imgAlt.startsWith('CN') && !imgAlt.startsWith('JP') && !imgAlt.startsWith('KR')) {
@@ -86,7 +87,7 @@ export function parseWestmangaContentsHTML(
       }
     }
     if (!title) {
-      title = $(el).text().trim();
+      title = $(el).attr('title') || $(el).text().trim();
     }
     if (!title || title.length < 2) {
       title = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
