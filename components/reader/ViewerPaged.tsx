@@ -180,6 +180,7 @@ export const ViewerPaged: React.FC<ViewerPagedProps> = ({
               src={currentImageSrc}
               alt={`${comicTitle} - Chapter ${chapterNumber} - Halaman ${currentPage.page_number}`}
               decoding="async"
+              referrerPolicy="no-referrer"
               // @ts-ignore fetchpriority is valid in modern browsers
               fetchpriority="high"
               onLoad={() => {

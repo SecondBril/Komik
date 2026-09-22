@@ -122,6 +122,7 @@ export const ViewerScroll: React.FC<ViewerScrollProps> = ({
                 alt={`${comicTitle} - Chapter ${chapterNumber} - Halaman ${page.page_number}`}
                 loading={isPriority ? 'eager' : 'lazy'}
                 decoding="async"
+                referrerPolicy="no-referrer"
                 // @ts-ignore fetchpriority attribute for modern browsers
                 fetchpriority={isPriority ? 'high' : 'auto'}
                 onLoad={() => handleImageLoad(index)}

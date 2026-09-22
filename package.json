@@ -12,7 +12,8 @@
     "process-images": "npm run process-images --prefix workers",
     "repair-queue": "npm run repair-queue --prefix workers",
     "enrich-comics": "npx ts-node --project workers/tsconfig.json workers/scraper/enrich-all.ts",
-    "sync-relations": "npx tsx scripts/sync-all-relations-to-db.mjs"
+    "sync-relations": "npx tsx scripts/sync-all-relations-to-db.mjs",
+    "sync-comics": "node --env-file=.env.local scripts/sync-catalog-cli.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

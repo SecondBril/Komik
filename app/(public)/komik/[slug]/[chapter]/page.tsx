@@ -37,6 +37,11 @@ export default function ReadingViewerPage() {
   const [isNavVisible, setIsNavVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [quotaExceeded, setQuotaExceeded] = useState<{
+    message: string;
+    resetAt?: string;
+    limit?: number;
+  } | null>(null);
 
   // Auto-scroll and Page Navigation States
   const [isAutoScrolling, setIsAutoScrolling] = useState(false);
@@ -47,6 +52,7 @@ export default function ReadingViewerPage() {
   useEffect(() => {
     setIsAutoScrolling(false);
     setPagedCurrentIndex(0);
+    setQuotaExceeded(null);
   }, [slug, chapterNo]);
 
   // Auto-scroll continuous smooth execution (60fps/120fps glide without stutter)
@@ -69,7 +75,6 @@ export default function ReadingViewerPage() {
         lastTimestamp = timestamp;
 
         // Continuous smooth velocity:
-        // autoScrollSpeed is seconds per viewport height
         const viewportHeight = window.innerHeight || 800;
         const pixelsPerSecond = viewportHeight / Math.max(1, autoScrollSpeed);
         const deltaPixels = (pixelsPerSecond * deltaMs) / 1000;
@@ -155,12 +160,23 @@ export default function ReadingViewerPage() {
   const loadData = async () => {
     if (!slug || isNaN(chapterNo)) return;
     setLoading(true);
+    setQuotaExceeded(null);
 
     try {
       const res = await fetch(`/api/reader?slug=${encodeURIComponent(slug)}&chapter=${chapterNo}`, {
         cache: 'no-store',
       });
       const data = await res.json();
+
+      if (res.status === 429 || data.quotaExceeded) {
+        setQuotaExceeded({
+          message: data.error || 'Batas harian 10.000 request telah tercapai.',
+          resetAt: data.resetAt,
+          limit: data.limit || 10000,
+        });
+        setLoading(false);
+        return;
+      }
 
       if (data.success && data.comic && data.currentChapter) {
         setComic(data.comic);
@@ -199,6 +215,56 @@ export default function ReadingViewerPage() {
   useEffect(() => {
     loadData();
   }, [slug, chapterNo]);
+
+  // Quota Exceeded Screen (10.000 requests/day reached)
+  if (quotaExceeded) {
+    return (
+      <div className="fixed inset-0 bg-[#F7F2E6] z-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md w-full bg-white rounded-[32px] border-[3px] border-[#1A1A1A] shadow-[8px_8px_0px_#1A1A1A] p-6 sm:p-8 flex flex-col items-center text-center">
+          <div className="mb-4">
+            <ChameleonMascot variant="avatar" size={88} />
+          </div>
+
+          <div className="px-4 py-1.5 rounded-full bg-[#FFEAEA] border-2 border-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] mb-3 flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-[#C53030]" />
+            <span className="text-xs font-black text-[#C53030]">
+              Batas Harian 10.000 Request Tercapai
+            </span>
+          </div>
+
+          <h2 className="text-xl sm:text-2xl font-black text-[#1A1A1A] mb-2">
+            Hebat! Kamu Pembaca Sejati!
+          </h2>
+
+          <p className="text-sm text-[#4A453E] font-medium leading-relaxed mb-4">
+            {quotaExceeded.message}
+          </p>
+
+          <div className="w-full p-3.5 rounded-2xl bg-[#F6C945]/20 border-2 border-[#1A1A1A] mb-6 flex flex-col items-center text-xs font-bold text-[#1A1A1A]">
+            <span>Kuota akan otomatis direset besok:</span>
+            <span className="text-sm font-black text-[#1A1A1A] mt-0.5">
+              Pukul 00:00 WIB (Tengah Malam)
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 w-full">
+            <Link
+              href={`/komik/${slug}`}
+              className="flex-1 py-3 px-4 rounded-full bg-[#F6C945] hover:bg-[#EDB72B] text-[#1A1A1A] font-black text-xs border-2 border-[#1A1A1A] shadow-[3px_3px_0px_#1A1A1A] active:translate-x-[2px] active:translate-y-[2px] transition-all text-center"
+            >
+              Daftar Chapter
+            </Link>
+            <Link
+              href="/"
+              className="flex-1 py-3 px-4 rounded-full bg-white hover:bg-neutral-100 text-[#1A1A1A] font-black text-xs border-2 border-[#1A1A1A] shadow-[3px_3px_0px_#1A1A1A] active:translate-x-[2px] active:translate-y-[2px] transition-all text-center"
+            >
+              Beranda
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Loading Screen in Chameleon Neo-Comic Theme
   if (loading || !comic || !currentChapter) {
