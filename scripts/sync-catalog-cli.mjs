@@ -62,7 +62,7 @@ function getChromeExecutablePath() {
   return null;
 }
 
-async function fetchLatestComicChapter(browser, slug) {
+async function fetchComicChapters(browser, slug) {
   const page = await browser.newPage();
   try {
     const url = `https://v1.westmanga.my/comic/${slug}`;
@@ -73,7 +73,8 @@ async function fetchLatestComicChapter(browser, slug) {
 
     const html = await page.content();
     const $ = cheerio.load(html);
-    let latestCh = null;
+    const chapters = [];
+    const seenCh = new Set();
 
     $('a[href*="/view/"]').each((_, a) => {
       const txt = $(a).text().trim();
@@ -81,22 +82,24 @@ async function fetchLatestComicChapter(browser, slug) {
       const match = txt.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i) || href.match(/chapter-(\d+(?:[\.-]\d+)?)/i);
       if (match) {
         const chNum = parseFloat(match[1].replace('-', '.'));
-        if (!latestCh || chNum > latestCh.chapterNumber) {
-          latestCh = {
-            chapterNumber: chNum,
+        if (!seenCh.has(chNum)) {
+          seenCh.add(chNum);
+          chapters.push({
+            chapter_number: chNum,
             title: `Chapter ${chNum}`,
-          };
+          });
         }
       }
     });
 
-    return latestCh;
+    return chapters;
   } catch (err) {
-    return null;
+    return [];
   } finally {
     await page.close().catch(() => {});
   }
 }
+
 
 
 async function runCliSync() {
@@ -288,22 +291,33 @@ async function runCliSync() {
               await syncWorkerComicGenres(supabase, comicId, meta.genres);
             }
 
-            // HANYA AMBIL 1 CHAPTER TERBARU
-            let latestCh = item.latestChapter;
-            if (!latestCh?.chapterNumber && browser) {
-              latestCh = await fetchLatestComicChapter(browser, item.slug);
+            // Ambil SEMUA daftar chapter komik agar seluruh chapter tampil di web
+            let chapters = [];
+            if (browser) {
+              chapters = await fetchComicChapters(browser, item.slug);
             }
 
-            if (latestCh?.chapterNumber) {
+            if (chapters.length > 0) {
+              const rows = chapters.map((ch) => ({
+                comic_id: comicId,
+                chapter_number: ch.chapter_number,
+                title: ch.title,
+                status: 'published',
+                released_at: new Date().toISOString(),
+              }));
+              await supabase.from('chapters').upsert(rows, { onConflict: 'comic_id,chapter_number' });
+              newChapters += chapters.length;
+              console.log(`     ✓ Mendaftarkan ${chapters.length} chapter (semua chapter tampil di web).`);
+            } else if (item.latestChapter?.chapterNumber) {
               await supabase.from('chapters').insert({
                 comic_id: comicId,
-                chapter_number: latestCh.chapterNumber,
-                title: latestCh.title || `Chapter ${latestCh.chapterNumber}`,
+                chapter_number: item.latestChapter.chapterNumber,
+                title: item.latestChapter.title || `Chapter ${item.latestChapter.chapterNumber}`,
                 status: 'published',
                 released_at: new Date().toISOString(),
               });
               newChapters++;
-              console.log(`     ✓ Chapter terbaru didaftarkan: Chapter ${latestCh.chapterNumber}`);
+              console.log(`     ✓ Chapter terbaru didaftarkan: Chapter ${item.latestChapter.chapterNumber}`);
             }
           }
         } else {
@@ -346,7 +360,31 @@ async function runCliSync() {
             }
           }
 
-          // 2. Cek apakah ada chapter baru dari card (hanya 1 chapter terbaru)
+          // 2. Jika komik di DB hanya punya 0 atau 1 chapter, lengkapi semua chapternya agar tampil di web
+          if (browser) {
+            const { count } = await supabase
+              .from('chapters')
+              .select('id', { count: 'exact', head: true })
+              .eq('comic_id', existing.id);
+
+            if (!count || count <= 1) {
+              const chapters = await fetchComicChapters(browser, item.slug);
+              if (chapters.length > 1) {
+                const rows = chapters.map((ch) => ({
+                  comic_id: existing.id,
+                  chapter_number: ch.chapter_number,
+                  title: ch.title,
+                  status: 'published',
+                  released_at: new Date().toISOString(),
+                }));
+                await supabase.from('chapters').upsert(rows, { onConflict: 'comic_id,chapter_number' });
+                newChapters += (chapters.length - (count || 0));
+                console.log(`   + Memperbarui daftar chapter "${existing.title}": ${chapters.length} chapter sekarang lengkap.`);
+              }
+            }
+          }
+
+          // 3. Cek apakah ada chapter baru dari card
           if (item.latestChapter?.chapterNumber) {
             const chNum = item.latestChapter.chapterNumber;
             const { data: chExist } = await supabase

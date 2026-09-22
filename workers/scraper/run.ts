@@ -216,7 +216,23 @@ async function runScraperWorker() {
         (url.includes('ik.imagekit.io') || url.includes('/api/storage/onedrive')) &&
         !url.includes('error');
 
-      // 4. HANYA AMBIL 1 CHAPTER TERBARU (CUMA SATU CHAPTER SAJA)
+      // 3. Daftarkan SEMUA chapter metadata ke database agar seluruh chapter tampil di web
+      const missingChapters = comicDetail.chapters.filter((ch) => !existingChapterMap.has(ch.chapterNumber));
+      if (missingChapters.length > 0) {
+        const rowsToInsert = missingChapters.map((ch) => ({
+          comic_id: comic.id,
+          chapter_number: ch.chapterNumber,
+          title: `Chapter ${ch.chapterNumber}`,
+          status: 'published',
+          released_at: new Date().toISOString(),
+        }));
+        await supabase.from('chapters').upsert(rowsToInsert, { onConflict: 'comic_id,chapter_number' });
+        console.log(
+          `[Scraper Worker] Mendaftarkan ${rowsToInsert.length} metadata chapter untuk "${comic.title}" agar tampil di web.`
+        );
+      }
+
+      // 4. Scrape gambar hanya untuk chapter terbaru
       const sortedChapters = [...comicDetail.chapters].sort((a, b) => b.chapterNumber - a.chapterNumber);
       const chItem = sortedChapters[0];
 
@@ -226,7 +242,7 @@ async function runScraperWorker() {
       }
 
       console.log(
-        `[Scraper Worker] Comic "${comic.title}" -> Processing ONLY latest chapter: Chapter ${chItem.chapterNumber}`
+        `[Scraper Worker] Comic "${comic.title}" -> Processing reader images for latest chapter: Chapter ${chItem.chapterNumber}`
       );
 
       const existingChapter = existingChapterMap.get(chItem.chapterNumber);

@@ -274,32 +274,35 @@ export async function syncWestmangaComics(options: { maxPages?: number } = {}): 
             await syncWorkerComicGenres(supabase, newComic.id, meta.genres).catch(() => {});
           }
 
-          // Daftarkan HANYA 1 CHAPTER TERBARU (CUMA SATU CHAPTER SAJA)
-          let latestChapterNumber: number | undefined;
-          let latestChapterTitle: string | undefined;
+          // Daftarkan SEMUA chapter yang ditemukan agar seluruh chapter tampil di web
+          const chaptersToInsert: any[] = [];
 
           if (detail && detail.chapters.length > 0) {
-            const sortedCh = [...detail.chapters].sort((a, b) => b.chapterNumber - a.chapterNumber);
-            latestChapterNumber = sortedCh[0].chapterNumber;
-            latestChapterTitle = sortedCh[0].title;
+            detail.chapters.forEach((ch) => {
+              chaptersToInsert.push({
+                comic_id: newComic.id,
+                chapter_number: ch.chapterNumber,
+                title: ch.title,
+                status: 'published',
+                released_at: new Date().toISOString(),
+              });
+            });
           } else if (item.latestChapter?.chapterNumber) {
-            latestChapterNumber = item.latestChapter.chapterNumber;
-            latestChapterTitle = item.latestChapter.title;
-          }
-
-          if (latestChapterNumber !== undefined) {
-            const { error: chErr } = await supabase.from('chapters').insert({
+            chaptersToInsert.push({
               comic_id: newComic.id,
-              chapter_number: latestChapterNumber,
-              title: latestChapterTitle || `Chapter ${latestChapterNumber}`,
+              chapter_number: item.latestChapter.chapterNumber,
+              title: item.latestChapter.title || `Chapter ${item.latestChapter.chapterNumber}`,
               status: 'published',
               released_at: new Date().toISOString(),
             });
+          }
 
+          if (chaptersToInsert.length > 0) {
+            const { error: chErr } = await supabase.from('chapters').insert(chaptersToInsert);
             if (!chErr) {
-              stats.newChaptersAdded += 1;
+              stats.newChaptersAdded += chaptersToInsert.length;
               console.log(
-                `[CatalogSync] -> Berhasil mendaftarkan 1 chapter terbaru (Chapter ${latestChapterNumber}) untuk "${newComic.title}"`
+                `[CatalogSync] -> Berhasil mendaftarkan ${chaptersToInsert.length} chapter untuk "${newComic.title}"`
               );
             }
           }
