@@ -24,8 +24,17 @@ export const Navbar: React.FC = () => {
   const [userProfile, setUserProfile] = useState<{ name: string; email: string; avatar: string } | null>(null);
   const [toastMessage, setToastMessage] = useState('');
   const [isToastOpen, setIsToastOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const mobileSearchContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 12);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Sync Supabase Auth session & local storage
   useEffect(() => {
@@ -139,7 +148,13 @@ export const Navbar: React.FC = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full bg-[#F7F2E6]/95 backdrop-blur-md border-b-2 border-[#1A1A1A] py-2 sm:py-2.5 transition-all">
+      <header
+        className={`sticky top-0 z-50 w-full transition-all duration-200 border-b-2 border-[#1A1A1A] ${
+          isScrolled
+            ? 'bg-[#F7F2E6]/95 backdrop-blur-md shadow-[0_4px_16px_rgba(0,0,0,0.08)] py-2'
+            : 'bg-[#F7F2E6] py-2.5 sm:py-3'
+        }`}
+      >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
 
           {/* Logo Brand with Chameleon Avatar */}

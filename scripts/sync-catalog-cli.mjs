@@ -65,9 +65,9 @@ async function fetchComicChapters(browser, slug) {
   const page = await browser.newPage();
   try {
     const url = `https://v1.westmanga.my/comic/${slug}`;
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 }).catch(() => {});
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
     try {
-      await page.waitForSelector('a[href*="/view/"]', { timeout: 6000 });
+      await page.waitForSelector('a[href*="/view/"]', { timeout: 5000 });
     } catch {}
 
     const html = await page.content();
@@ -93,7 +93,6 @@ async function fetchComicChapters(browser, slug) {
 
     return chapters;
   } catch (err) {
-    console.warn(`Could not load chapters for ${slug}:`, err.message);
     return [];
   } finally {
     await page.close().catch(() => {});
@@ -102,7 +101,7 @@ async function fetchComicChapters(browser, slug) {
 
 async function runCliSync() {
   console.log('=====================================================');
-  console.log('  WESTMANGA AUTO-SYNC (METADATA & NEW CHAPTERS ONLY) ');
+  console.log('  WESTMANGA AUTO-SYNC (DYNAMIC CATALOG & CHAPTERS)   ');
   console.log('  TIDAK MENYIMPAN GAMBAR CHAPTER DI DATABASE         ');
   console.log('=====================================================\n');
 
@@ -121,14 +120,24 @@ async function runCliSync() {
     }
   }
 
-  const maxPages = parseInt(process.env.SYNC_MAX_PAGES || '2', 10);
+  // Support argument: node scripts/sync-catalog-cli.mjs 1000 or env SYNC_MAX_PAGES
+  // Defaults to 300 pages (covers full 270 pages on Westmanga)
+  const maxRequestedPages = parseInt(process.argv[2] || process.env.SYNC_MAX_PAGES || '300', 10);
+  console.log(`Batas maksimal scanning: hingga ${maxRequestedPages} halaman.`);
+
   let newComics = 0;
   let newChapters = 0;
+  let totalDetectedPages = 270; // Westmanga catalog total is 270 pages (6,742 comics)
 
   try {
-    for (let page = 1; page <= maxPages; page++) {
+    for (let page = 1; page <= maxRequestedPages; page++) {
+      if (page > totalDetectedPages) {
+        console.log(`\nSudah mencapai halaman terakhir katalog (${totalDetectedPages}). Selesai.`);
+        break;
+      }
+
       const url = `https://v1.westmanga.my/contents?page=${page}`;
-      console.log(`\nScanning ${url}...`);
+      console.log(`\n[Halaman ${page}/${Math.min(maxRequestedPages, totalDetectedPages)}] Scanning ${url}...`);
 
       let html = '';
       if (browser) {
@@ -138,8 +147,11 @@ async function runCliSync() {
           try {
             await bPage.waitForSelector('a[href*="/comic/"]', { timeout: 10000 });
           } catch {
-            await new Promise((r) => setTimeout(r, 3000));
+            await new Promise((r) => setTimeout(r, 2500));
           }
+
+          // Delay for hydration
+          await new Promise((r) => setTimeout(r, 2000));
           html = await bPage.content();
         } finally {
           await bPage.close().catch(() => {});
@@ -152,43 +164,70 @@ async function runCliSync() {
       const items = [];
       const seen = new Set();
 
-      // Scoped card extraction to prevent mixing cards
-      $('div.flex.items-start.gap-2').each((_, el) => {
-        const card = $(el);
-        const link = card.find('a[href*="/comic/"]').first();
-        const href = link.attr('href') || '';
-        const match = href.match(/\/comic\/([a-zA-Z0-9_-]+)/i);
-        if (!match) return;
-        const slug = match[1];
+      // Robust extraction of ALL 30 comics per page (main grid + new projects)
+      $('a[href*="/comic/"]').each((_, a) => {
+        const href = $(a).attr('href') || '';
+        const m = href.match(/\/comic\/([a-zA-Z0-9_-]+)/i);
+        if (!m) return;
+        const slug = m[1];
         if (seen.has(slug)) return;
         seen.add(slug);
 
-        let title = card.find('div.flex-col a[href*="/comic/"] p').first().text().trim() ||
-                    card.find('p.font-medium, p.font-semibold, p.text-sm').first().text().trim();
+        const card = $(a).closest('div.group, div.relative.rounded-md, div.flex.items-start, div.space-y-1').parent();
+
+        let title = card.find('p.font-medium, p.font-semibold, p.text-sm').first().text().trim();
         if (!title) {
-          title = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+          title = card.find('img[alt]').first().attr('alt')?.trim() || '';
+        }
+        if (!title || title.startsWith('JP') || title.startsWith('CN') || title.startsWith('KR')) {
+          title = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
         }
 
-        let coverUrl = card.find('img[src*="storage.westmanga"], img.object-fill, img').first().attr('src') || '';
-        if (coverUrl.includes('flagcdn')) coverUrl = '';
+        let coverUrl = card.find('img.object-fill, img[src*="storage.westmanga"], img').first().attr('src') || '';
+        if (coverUrl.includes('flagcdn')) {
+          card.find('img').each((_, img) => {
+            const src = $(img).attr('src') || '';
+            if (src && !src.includes('flagcdn') && !coverUrl.includes('storage.westmanga')) {
+              coverUrl = src;
+            }
+          });
+        }
 
         let type = 'manhwa';
         const flag = card.find('img[src*="flagcdn"]').first().attr('src') || '';
         if (flag.includes('/cn.')) type = 'manhua';
         else if (flag.includes('/jp.')) type = 'manga';
 
+        let latestChapter = undefined;
+        const chEl = card.find('a[href*="/view/"]').first();
+        if (chEl.length) {
+          const chText = chEl.text().trim();
+          const chMatch = chText.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i);
+          if (chMatch) {
+            latestChapter = {
+              chapterNumber: parseFloat(chMatch[1].replace('-', '.')),
+              title: `Chapter ${chMatch[1]}`,
+            };
+          }
+        }
+
         items.push({
           title,
           slug,
           coverUrl,
           type,
+          latestChapter,
         });
       });
 
-      console.log(`Ditemukan ${items.length} komik di halaman ${page}`);
+      if (items.length === 0) {
+        console.log(`Halaman ${page} tidak memiliki komik. Menghentikan scanning.`);
+        break;
+      }
+
+      console.log(`-> Ditemukan ${items.length} komik di halaman ${page}`);
 
       for (const item of items) {
-        // Cek apakah komik sudah ada di DB
         const { data: existing } = await supabase
           .from('comics')
           .select('id, title, slug')
@@ -198,7 +237,7 @@ async function runCliSync() {
         let comicId = existing?.id;
 
         if (!existing) {
-          console.log(`-> Komik baru: "${item.title}" (${item.slug})`);
+          console.log(`   + Komik baru: "${item.title}" (${item.slug})`);
 
           const { data: newComic, error: insErr } = await supabase
             .from('comics')
@@ -218,18 +257,52 @@ async function runCliSync() {
           if (!insErr && newComic) {
             newComics++;
             comicId = newComic.id;
+
+            // Masukkan latest chapter langsung jika ada dari card
+            if (item.latestChapter?.chapterNumber) {
+              await supabase.from('chapters').insert({
+                comic_id: comicId,
+                chapter_number: item.latestChapter.chapterNumber,
+                title: item.latestChapter.title,
+                status: 'published',
+                released_at: new Date().toISOString(),
+              });
+              newChapters++;
+            }
+          }
+        } else {
+          // Komik sudah ada: cek apakah ada chapter baru dari card
+          if (item.latestChapter?.chapterNumber) {
+            const chNum = item.latestChapter.chapterNumber;
+            const { data: chExist } = await supabase
+              .from('chapters')
+              .select('id')
+              .eq('comic_id', existing.id)
+              .eq('chapter_number', chNum)
+              .maybeSingle();
+
+            if (!chExist) {
+              console.log(`   + Chapter baru untuk "${existing.title}": Chapter ${chNum}`);
+              await supabase.from('chapters').insert({
+                comic_id: existing.id,
+                chapter_number: chNum,
+                title: item.latestChapter.title,
+                status: 'published',
+                released_at: new Date().toISOString(),
+              });
+              newChapters++;
+            }
           }
         }
 
+        // Jika komik baru atau belum punya chapter sama sekali di DB, ambil daftar chapter awal
         if (comicId && browser) {
-          // Cek apakah komik ini belum punya chapter di DB atau perlu disinkronkan
           const { count } = await supabase
             .from('chapters')
             .select('id', { count: 'exact', head: true })
             .eq('comic_id', comicId);
 
           if (!count || count === 0) {
-            console.log(`   Mengambil daftar chapter awal untuk "${item.title}"...`);
             const chapters = await fetchComicChapters(browser, item.slug);
             if (chapters.length > 0) {
               const rows = chapters.map((ch) => ({
@@ -241,7 +314,6 @@ async function runCliSync() {
               }));
               await supabase.from('chapters').upsert(rows, { onConflict: 'comic_id,chapter_number' });
               newChapters += chapters.length;
-              console.log(`   + ${chapters.length} chapter ditambahkan.`);
             }
           }
         }

@@ -25,9 +25,9 @@ export default function PublicLayout({
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F7F2E6] text-[#1A1A1A] selection:bg-[#F6C945] selection:text-[#1A1A1A] overflow-x-clip">
+    <div className="min-h-screen flex flex-col bg-[#F7F2E6] text-[#1A1A1A] selection:bg-[#F6C945] selection:text-[#1A1A1A]">
       <Navbar />
-      <main className="flex-1 w-full max-w-5xl mx-auto pb-16 relative">
+      <main className="flex-1 w-full max-w-5xl mx-auto pb-16 relative overflow-x-clip">
         {children}
       </main>
 

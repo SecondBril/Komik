@@ -52,6 +52,10 @@ function BrowseContent() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
 
+  // Pagination state: default 50 per page (option 50 or 100)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [perPage, setPerPage] = useState<number>(50);
+
   // Sort genres by real comic count descending
   const sortedGenres = useMemo(() => {
     return [...genres].sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
@@ -94,7 +98,7 @@ function BrowseContent() {
       .catch(() => { });
   }, []);
 
-  // Fetch comics with multi-category & detailed filters
+  // Fetch comics with multi-category & detailed filters + pagination
   const fetchComics = useCallback(async () => {
     setLoading(true);
     try {
@@ -104,7 +108,8 @@ function BrowseContent() {
       if (activeSort !== 'latest') params.set('sort', activeSort);
       if (searchQuery.trim()) params.set('q', searchQuery.trim());
       if (selectedGenres.length > 0) params.set('genres', selectedGenres.join(','));
-      params.set('limit', '36');
+      params.set('page', String(currentPage));
+      params.set('limit', String(perPage));
 
       const res = await fetch(`/api/browse?${params.toString()}`);
       const data = await res.json();
@@ -144,26 +149,62 @@ function BrowseContent() {
         } else {
           filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
         }
-        setComics(filtered);
-        setTotal(filtered.length);
+        const totalCount = filtered.length;
+        const paginated = filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
+        setComics(paginated);
+        setTotal(totalCount);
       }
     } catch {
-      setComics(MOCK_COMICS);
+      setComics(MOCK_COMICS.slice(0, perPage));
       setTotal(MOCK_COMICS.length);
     } finally {
       setLoading(false);
     }
-  }, [activeType, activeStatus, activeSort, selectedGenres, searchQuery]);
+  }, [activeType, activeStatus, activeSort, selectedGenres, searchQuery, currentPage, perPage]);
 
   useEffect(() => {
     fetchComics();
   }, [fetchComics]);
 
-  // Toggle multi-genre selection
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
+    setCurrentPage(newPage);
+    const comicsSection = document.getElementById('comics-list-section');
+    if (comicsSection) {
+      comicsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.scrollTo({ top: 400, behavior: 'smooth' });
+    }
+  };
+
+  const getPaginationPills = () => {
+    const pages: (number | string)[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (currentPage > 3) pages.push('...');
+
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+
+      if (currentPage < totalPages - 2) pages.push('...');
+      pages.push(totalPages);
+    }
+    return pages;
+  };
+
+  // Toggle multi-genre selection (reset page to 1)
   const handleToggleGenre = (slug: string) => {
     setSelectedGenres((prev) =>
       prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
     );
+    setCurrentPage(1);
   };
 
   const handleResetFilters = () => {
@@ -173,6 +214,7 @@ function BrowseContent() {
     setSelectedGenres([]);
     setSearchQuery('');
     setIsFilterDrawerOpen(false);
+    setCurrentPage(1);
   };
 
   const hasActiveFilters =
@@ -245,7 +287,10 @@ function BrowseContent() {
               return (
                 <button
                   key={opt.value}
-                  onClick={() => setActiveType(opt.value)}
+                  onClick={() => {
+                    setActiveType(opt.value);
+                    setCurrentPage(1);
+                  }}
                   className={`shrink-0 px-3.5 py-1.5 rounded-full border-2 border-[#1A1A1A] text-xs font-black tracking-tight transition-all active:translate-x-[1px] active:translate-y-[1px] ${isActive
                       ? 'bg-[#F6C945] text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A]'
                       : 'bg-[#FAF7F0] text-[#1A1A1A] hover:bg-white'
@@ -262,7 +307,10 @@ function BrowseContent() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
               placeholder="Cari judul komik..."
               className="w-full py-2 pl-9 pr-8 rounded-2xl bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
             />
@@ -270,7 +318,10 @@ function BrowseContent() {
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
+                onClick={() => {
+                  setSearchQuery('');
+                  setCurrentPage(1);
+                }}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8C8C8C] hover:text-[#1A1A1A]"
               >
                 <X className="w-3.5 h-3.5" />
@@ -282,7 +333,10 @@ function BrowseContent() {
           <div className="flex items-center gap-2">
             <select
               value={activeSort}
-              onChange={(e) => setActiveSort(e.target.value)}
+              onChange={(e) => {
+                setActiveSort(e.target.value);
+                setCurrentPage(1);
+              }}
               className="py-2 px-3 rounded-2xl bg-[#FAF7F0] border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] focus:outline-none shadow-sm cursor-pointer"
             >
               {SORT_OPTIONS.map((s) => (
@@ -456,7 +510,7 @@ function BrowseContent() {
         </section>
 
         {/* 4. Comics Results List - Responsive Grid */}
-        <section className="flex flex-col gap-4 mt-2">
+        <section id="comics-list-section" className="flex flex-col gap-4 mt-2">
           <div className="flex items-center justify-between border-b-2 border-[#1A1A1A] pb-2">
             <h3 className="text-lg sm:text-xl font-black text-[#1A1A1A] tracking-tight">
               {selectedGenres.length > 0
@@ -487,11 +541,86 @@ function BrowseContent() {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-              {comics.map((comic) => (
-                <ComicCard key={comic.id} comic={comic} />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
+                {comics.map((comic) => (
+                  <ComicCard key={comic.id} comic={comic} />
+                ))}
+              </div>
+
+              {/* Neo-Comic Pagination Controls */}
+              {totalPages > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-6 border-t-2 border-[#1A1A1A]/20">
+                  {/* Left info & Per page toggle (50 or 100) */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs font-bold text-[#7A756D]">
+                      Menampilkan <span className="text-[#1A1A1A] font-black">{total === 0 ? 0 : (currentPage - 1) * perPage + 1} - {Math.min(currentPage * perPage, total)}</span> dari <span className="text-[#1A1A1A] font-black">{total}</span> komik
+                    </span>
+                    <div className="flex items-center gap-1 bg-white p-1 rounded-xl border-2 border-[#1A1A1A] shadow-sm">
+                      <button
+                        onClick={() => { setPerPage(50); setCurrentPage(1); }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                          perPage === 50 ? 'bg-[#F6C945] text-[#1A1A1A]' : 'text-[#7A756D] hover:text-[#1A1A1A]'
+                        }`}
+                      >
+                        50 / hal
+                      </button>
+                      <button
+                        onClick={() => { setPerPage(100); setCurrentPage(1); }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                          perPage === 100 ? 'bg-[#F6C945] text-[#1A1A1A]' : 'text-[#7A756D] hover:text-[#1A1A1A]'
+                        }`}
+                      >
+                        100 / hal
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right page navigation buttons */}
+                  <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                    <button
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage <= 1}
+                      className="px-3 py-1.5 rounded-xl bg-white border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                    >
+                      « Prev
+                    </button>
+
+                    {getPaginationPills().map((p, idx) => {
+                      if (p === '...') {
+                        return (
+                          <span key={`dots-${idx}`} className="px-2 py-1 text-xs font-black text-[#7A756D]">
+                            ...
+                          </span>
+                        );
+                      }
+                      const isCurrent = p === currentPage;
+                      return (
+                        <button
+                          key={p}
+                          onClick={() => handlePageChange(Number(p))}
+                          className={`min-w-[34px] h-[34px] rounded-xl border-2 border-[#1A1A1A] text-xs font-black transition-all flex items-center justify-center ${
+                            isCurrent
+                              ? 'bg-[#2E7D6E] text-white shadow-[2px_2px_0px_#1A1A1A] scale-105'
+                              : 'bg-white text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#FAF7F0] active:translate-x-[1px] active:translate-y-[1px]'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage >= totalPages}
+                      className="px-3 py-1.5 rounded-xl bg-white border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                    >
+                      Next »
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </section>
       </div>
@@ -551,7 +680,10 @@ function BrowseContent() {
                   {TYPE_OPTIONS.map((t) => (
                     <button
                       key={t.value}
-                      onClick={() => setActiveType(t.value)}
+                      onClick={() => {
+                        setActiveType(t.value);
+                        setCurrentPage(1);
+                      }}
                       className={`py-2 px-3 rounded-xl border-2 border-[#1A1A1A] text-xs font-bold text-left transition-all ${activeType === t.value
                           ? 'bg-[#F6C945] text-[#1A1A1A] shadow-sm'
                           : 'bg-white text-[#1A1A1A] hover:bg-[#FAF7F0]'
@@ -572,7 +704,10 @@ function BrowseContent() {
                   {STATUS_OPTIONS.map((st) => (
                     <button
                       key={st.value}
-                      onClick={() => setActiveStatus(st.value)}
+                      onClick={() => {
+                        setActiveStatus(st.value);
+                        setCurrentPage(1);
+                      }}
                       className={`py-2 px-2 rounded-xl border-2 border-[#1A1A1A] text-xs font-bold text-center transition-all ${activeStatus === st.value
                           ? 'bg-[#F6C945] text-[#1A1A1A] shadow-sm'
                           : 'bg-white text-[#1A1A1A] hover:bg-[#FAF7F0]'
@@ -592,7 +727,10 @@ function BrowseContent() {
                   </span>
                   {selectedGenres.length > 0 && (
                     <button
-                      onClick={() => setSelectedGenres([])}
+                      onClick={() => {
+                        setSelectedGenres([]);
+                        setCurrentPage(1);
+                      }}
                       className="text-[11px] font-bold text-[#E96379] underline"
                     >
                       Reset Genre

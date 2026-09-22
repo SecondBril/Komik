@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const genres = searchParams.get('genres') || '';
   const sort = searchParams.get('sort') || 'latest';
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-  const limit = Math.min(60, parseInt(searchParams.get('limit') || '30', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)));
   const offset = (page - 1) * limit;
 
   const supabase = createAdminClient();
