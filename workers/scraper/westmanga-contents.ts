@@ -73,12 +73,13 @@ export function parseWestmangaContentsHTML(
 
     // Find the enclosing card container
     // Strict card container to prevent grabbing other cards in the grid
-    const cardScope = $(el).closest('.group, .space-y-1, [data-slot="card"], .overflow-hidden');
+    const cardScope = $(el).closest('div.flex.items-start.gap-2, [data-slot="card"], .space-y-1');
 
     // 1. Extract Title
     let title = $(el).find('p').first().text().trim();
     if (!title && cardScope.length > 0) {
-      title = cardScope.find('p.font-medium, p.font-semibold').first().text().trim();
+      title = cardScope.find('div.flex-col a[href*="/comic/"] p').first().text().trim() ||
+              cardScope.find('p.font-medium, p.font-semibold, p.text-sm').first().text().trim();
     }
     if (!title) {
       const imgAlt = cardScope.find('img[alt]').attr('alt')?.trim();

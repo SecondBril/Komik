@@ -4,12 +4,29 @@ import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 import { execSync } from 'child_process';
 
+// If running locally without preloaded env, load .env.local if present
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY && fs.existsSync('.env.local')) {
+  try {
+    const envLines = fs.readFileSync('.env.local', 'utf8').split('\n');
+    for (const line of envLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx !== -1) {
+        const key = trimmed.slice(0, idx).trim();
+        let val = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+        if (!process.env[key]) process.env[key] = val;
+      }
+    }
+  } catch {}
+}
+
 // Load Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ Supabase credentials missing! Ensure NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set.');
+  console.error('❌ Supabase credentials missing! Ensure NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are set.');
   process.exit(1);
 }
 
@@ -44,6 +61,45 @@ function getChromeExecutablePath() {
   return null;
 }
 
+async function fetchComicChapters(browser, slug) {
+  const page = await browser.newPage();
+  try {
+    const url = `https://v1.westmanga.my/comic/${slug}`;
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 }).catch(() => {});
+    try {
+      await page.waitForSelector('a[href*="/view/"]', { timeout: 6000 });
+    } catch {}
+
+    const html = await page.content();
+    const $ = cheerio.load(html);
+    const chapters = [];
+    const seenCh = new Set();
+
+    $('a[href*="/view/"]').each((_, a) => {
+      const txt = $(a).text().trim();
+      const href = $(a).attr('href') || '';
+      const match = txt.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i) || href.match(/chapter-(\d+(?:[\.-]\d+)?)/i);
+      if (match) {
+        const chNum = parseFloat(match[1].replace('-', '.'));
+        if (!seenCh.has(chNum)) {
+          seenCh.add(chNum);
+          chapters.push({
+            chapter_number: chNum,
+            title: `Chapter ${chNum}`,
+          });
+        }
+      }
+    });
+
+    return chapters;
+  } catch (err) {
+    console.warn(`Could not load chapters for ${slug}:`, err.message);
+    return [];
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
 async function runCliSync() {
   console.log('=====================================================');
   console.log('  WESTMANGA AUTO-SYNC (METADATA & NEW CHAPTERS ONLY) ');
@@ -65,7 +121,7 @@ async function runCliSync() {
     }
   }
 
-  const maxPages = 2;
+  const maxPages = parseInt(process.env.SYNC_MAX_PAGES || '2', 10);
   let newComics = 0;
   let newChapters = 0;
 
@@ -96,53 +152,36 @@ async function runCliSync() {
       const items = [];
       const seen = new Set();
 
-      $('a[href*="/comic/"]').each((_, el) => {
-        const href = $(el).attr('href') || '';
+      // Scoped card extraction to prevent mixing cards
+      $('div.flex.items-start.gap-2').each((_, el) => {
+        const card = $(el);
+        const link = card.find('a[href*="/comic/"]').first();
+        const href = link.attr('href') || '';
         const match = href.match(/\/comic\/([a-zA-Z0-9_-]+)/i);
         if (!match) return;
         const slug = match[1];
         if (seen.has(slug)) return;
         seen.add(slug);
 
-        const cardScope = $(el).closest('.group, .space-y-1, .overflow-hidden, div[data-slot="card"]');
-        
-        let title = $(el).find('p').first().text().trim();
-        if (!title && cardScope.length > 0) {
-          title = cardScope.find('p.font-medium, p.font-semibold').first().text().trim();
-        }
+        let title = card.find('div.flex-col a[href*="/comic/"] p').first().text().trim() ||
+                    card.find('p.font-medium, p.font-semibold, p.text-sm').first().text().trim();
         if (!title) {
-          title = $(el).attr('title') || $(el).text().trim();
-        }
-        if (!title || title.length < 2) {
           title = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
         }
 
-        let coverUrl = cardScope.find('img.object-fill, img[src*="storage.westmanga"]').first().attr('src') ||
-                       cardScope.find('img').first().attr('src') || '';
+        let coverUrl = card.find('img[src*="storage.westmanga"], img.object-fill, img').first().attr('src') || '';
         if (coverUrl.includes('flagcdn')) coverUrl = '';
 
-        // Tipe komik dari flag
         let type = 'manhwa';
-        const flag = cardScope.find('img[src*="flagcdn"]').first().attr('src') || '';
+        const flag = card.find('img[src*="flagcdn"]').first().attr('src') || '';
         if (flag.includes('/cn.')) type = 'manhua';
         else if (flag.includes('/jp.')) type = 'manga';
-
-        // Chapter terbaru
-        const chEl = cardScope.find('a[href*="/view/"]').first();
-        let chNum = undefined;
-        let chTitle = '';
-        if (chEl.length > 0) {
-          chTitle = chEl.text().trim();
-          const chMatch = chTitle.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i);
-          if (chMatch) chNum = parseFloat(chMatch[1].replace('-', '.'));
-        }
 
         items.push({
           title,
           slug,
           coverUrl,
           type,
-          latestChapter: chNum ? { chapterNumber: chNum, title: chTitle } : undefined,
         });
       });
 
@@ -155,6 +194,8 @@ async function runCliSync() {
           .select('id, title, slug')
           .eq('slug', item.slug)
           .maybeSingle();
+
+        let comicId = existing?.id;
 
         if (!existing) {
           console.log(`-> Komik baru: "${item.title}" (${item.slug})`);
@@ -176,45 +217,31 @@ async function runCliSync() {
 
           if (!insErr && newComic) {
             newComics++;
-            if (item.latestChapter?.chapterNumber) {
-              await supabase.from('chapters').insert({
-                comic_id: newComic.id,
-                chapter_number: item.latestChapter.chapterNumber,
-                title: item.latestChapter.title || `Chapter ${item.latestChapter.chapterNumber}`,
-                status: 'published',
-                released_at: new Date().toISOString(),
-              });
-              newChapters++;
-            }
+            comicId = newComic.id;
           }
-        } else {
-          // Cek chapter baru
-          if (item.latestChapter?.chapterNumber) {
-            const chNum = item.latestChapter.chapterNumber;
-            const { data: chExist } = await supabase
-              .from('chapters')
-              .select('id')
-              .eq('comic_id', existing.id)
-              .eq('chapter_number', chNum)
-              .maybeSingle();
+        }
 
-            if (!chExist) {
-              console.log(`-> Chapter baru untuk "${existing.title}": Chapter ${chNum}`);
-              const { error: insChErr } = await supabase.from('chapters').insert({
-                comic_id: existing.id,
-                chapter_number: chNum,
-                title: item.latestChapter.title || `Chapter ${chNum}`,
+        if (comicId && browser) {
+          // Cek apakah komik ini belum punya chapter di DB atau perlu disinkronkan
+          const { count } = await supabase
+            .from('chapters')
+            .select('id', { count: 'exact', head: true })
+            .eq('comic_id', comicId);
+
+          if (!count || count === 0) {
+            console.log(`   Mengambil daftar chapter awal untuk "${item.title}"...`);
+            const chapters = await fetchComicChapters(browser, item.slug);
+            if (chapters.length > 0) {
+              const rows = chapters.map((ch) => ({
+                comic_id: comicId,
+                chapter_number: ch.chapter_number,
+                title: ch.title,
                 status: 'published',
                 released_at: new Date().toISOString(),
-              });
-
-              if (!insChErr) {
-                newChapters++;
-                await supabase
-                  .from('comics')
-                  .update({ updated_at: new Date().toISOString() })
-                  .eq('id', existing.id);
-              }
+              }));
+              await supabase.from('chapters').upsert(rows, { onConflict: 'comic_id,chapter_number' });
+              newChapters += chapters.length;
+              console.log(`   + ${chapters.length} chapter ditambahkan.`);
             }
           }
         }
