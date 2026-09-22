@@ -5,7 +5,7 @@ import {
   buildContentsUrl,
   DiscoveredComicSource,
 } from '@/lib/scrapers/westmanga-contents';
-import { getSharedPuppeteerBrowser } from '@/workers/scraper/parse-source';
+import { getSharedPuppeteerBrowser } from '@/lib/scraper/live-chapter-scraper';
 
 export const maxDuration = 60; // Allow long-running Puppeteer scan
 

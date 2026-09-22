@@ -106,6 +106,10 @@ async function getBrowser(): Promise<Browser | null> {
   return browserLaunchPromise;
 }
 
+export async function getSharedPuppeteerBrowser(): Promise<Browser | null> {
+  return getBrowser();
+}
+
 /**
  * Filter dan validasi URL gambar Westmanga agar hanya gambar komik resmi dari storage.westmanga.blog
  */

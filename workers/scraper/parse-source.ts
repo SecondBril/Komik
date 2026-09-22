@@ -1,5 +1,4 @@
 import * as cheerio from 'cheerio';
-import fetch from 'node-fetch';
 import https from 'https';
 import puppeteer, { Browser } from 'puppeteer-core';
 import fs from 'fs';
