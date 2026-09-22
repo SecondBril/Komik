@@ -13,7 +13,7 @@
     "repair-queue": "npm run repair-queue --prefix workers",
     "enrich-comics": "npx ts-node --project workers/tsconfig.json workers/scraper/enrich-all.ts",
     "sync-relations": "npx tsx scripts/sync-all-relations-to-db.mjs",
-    "sync-comics": "node scripts/sync-catalog-cli.mjs"
+    "sync-comics": "npx tsx scripts/sync-catalog-cli.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

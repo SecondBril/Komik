@@ -120,8 +120,8 @@ export async function fetchHTML(url: string): Promise<string | null> {
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     const response = await fetch(url, {
-      agent: (parsedUrl) => (parsedUrl.protocol === 'https:' ? httpsAgent : undefined) as any,
-      signal: controller.signal as any,
+      agent: (parsedUrl: any) => (parsedUrl.protocol === 'https:' ? httpsAgent : undefined),
+      signal: controller.signal,
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -129,7 +129,7 @@ export async function fetchHTML(url: string): Promise<string | null> {
           'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
       },
-    });
+    } as any);
     clearTimeout(timeoutId);
 
     if (response.status === 403 || response.status === 503 || !response.ok) {

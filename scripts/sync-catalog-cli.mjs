@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio';
 import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 import { execSync } from 'child_process';
+import { fetchComicMetadata, syncWorkerComicGenres } from '../workers/lib/comic-metadata.ts';
 
 // If running locally without preloaded env, load .env.local if present
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY && fs.existsSync('.env.local')) {
@@ -61,7 +62,7 @@ function getChromeExecutablePath() {
   return null;
 }
 
-async function fetchComicChapters(browser, slug) {
+async function fetchLatestComicChapter(browser, slug) {
   const page = await browser.newPage();
   try {
     const url = `https://v1.westmanga.my/comic/${slug}`;
@@ -72,8 +73,7 @@ async function fetchComicChapters(browser, slug) {
 
     const html = await page.content();
     const $ = cheerio.load(html);
-    const chapters = [];
-    const seenCh = new Set();
+    let latestCh = null;
 
     $('a[href*="/view/"]').each((_, a) => {
       const txt = $(a).text().trim();
@@ -81,23 +81,23 @@ async function fetchComicChapters(browser, slug) {
       const match = txt.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i) || href.match(/chapter-(\d+(?:[\.-]\d+)?)/i);
       if (match) {
         const chNum = parseFloat(match[1].replace('-', '.'));
-        if (!seenCh.has(chNum)) {
-          seenCh.add(chNum);
-          chapters.push({
-            chapter_number: chNum,
+        if (!latestCh || chNum > latestCh.chapterNumber) {
+          latestCh = {
+            chapterNumber: chNum,
             title: `Chapter ${chNum}`,
-          });
+          };
         }
       }
     });
 
-    return chapters;
+    return latestCh;
   } catch (err) {
-    return [];
+    return null;
   } finally {
     await page.close().catch(() => {});
   }
 }
+
 
 async function runCliSync() {
   console.log('=====================================================');
@@ -237,19 +237,44 @@ async function runCliSync() {
         let comicId = existing?.id;
 
         if (!existing) {
-          console.log(`   + Komik baru: "${item.title}" (${item.slug})`);
+          console.log(`   + Komik baru terdeteksi: "${item.title}" (${item.slug})`);
+
+          // Cari metadata ke AniList/API dengan exact title matching
+          const meta = await fetchComicMetadata(item.title);
+          if (meta) {
+            console.log(`     ✓ Ditemukan di ${meta.sourceApi.toUpperCase()}: Author="${meta.author}", Genres=${meta.genres.length}`);
+          } else {
+            console.log(`     - Tidak ada judul yang sama persis di AniList/API. Tetap disimpan dengan data Westmanga.`);
+          }
+
+          // Judul komik jangan dirubah (tetap gunakan item.title dari Westmanga)
+          const finalTitle = item.title;
+          const finalSlug = item.slug;
+          const finalType = meta?.type || item.type || 'manhwa';
+          const finalSynopsis =
+            meta?.synopsis ||
+            `Baca komik ${item.title} Bahasa Indonesia di Westmanga.`;
+          const finalCover =
+            meta?.cover_url ||
+            item.coverUrl ||
+            'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+          const finalAuthor = meta?.author || 'Unknown Author';
+          const finalRating = meta?.rating || 4.5;
+          const finalStatus = meta?.status || 'ongoing';
+          const finalAltTitles = meta?.alt_titles || [];
 
           const { data: newComic, error: insErr } = await supabase
             .from('comics')
             .insert({
-              slug: item.slug,
-              title: item.title,
-              type: item.type,
-              synopsis: `Baca komik ${item.title} Bahasa Indonesia di Westmanga.`,
-              cover_url: item.coverUrl || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80',
-              author: 'Unknown Author',
-              rating: 4.5,
-              status: 'ongoing',
+              slug: finalSlug,
+              title: finalTitle,
+              type: finalType,
+              synopsis: finalSynopsis,
+              cover_url: finalCover,
+              author: finalAuthor,
+              rating: finalRating,
+              status: finalStatus,
+              alt_titles: finalAltTitles,
             })
             .select('id, title, slug')
             .single();
@@ -258,20 +283,70 @@ async function runCliSync() {
             newComics++;
             comicId = newComic.id;
 
-            // Masukkan latest chapter langsung jika ada dari card
-            if (item.latestChapter?.chapterNumber) {
+            // Sync genre jika ditemukan dari metadata API
+            if (meta?.genres && meta.genres.length > 0) {
+              await syncWorkerComicGenres(supabase, comicId, meta.genres);
+            }
+
+            // HANYA AMBIL 1 CHAPTER TERBARU
+            let latestCh = item.latestChapter;
+            if (!latestCh?.chapterNumber && browser) {
+              latestCh = await fetchLatestComicChapter(browser, item.slug);
+            }
+
+            if (latestCh?.chapterNumber) {
               await supabase.from('chapters').insert({
                 comic_id: comicId,
-                chapter_number: item.latestChapter.chapterNumber,
-                title: item.latestChapter.title,
+                chapter_number: latestCh.chapterNumber,
+                title: latestCh.title || `Chapter ${latestCh.chapterNumber}`,
                 status: 'published',
                 released_at: new Date().toISOString(),
               });
               newChapters++;
+              console.log(`     ✓ Chapter terbaru didaftarkan: Chapter ${latestCh.chapterNumber}`);
             }
           }
         } else {
-          // Komik sudah ada: cek apakah ada chapter baru dari card
+          // Komik sudah ada di database:
+          // 1. Auto-enrich jika data masih default / Unknown Author (tetap pertahankan judul asli)
+          const { data: fullComic } = await supabase
+            .from('comics')
+            .select('id, title, author, synopsis, cover_url')
+            .eq('id', existing.id)
+            .single();
+
+          if (fullComic) {
+            const isUnknownAuthor = !fullComic.author || /unknown/i.test(fullComic.author);
+            const isDefaultSynopsis =
+              !fullComic.synopsis ||
+              fullComic.synopsis.includes('terjemahan Bahasa Indonesia') ||
+              fullComic.synopsis.includes('di Westmanga');
+
+            if (isUnknownAuthor || isDefaultSynopsis) {
+              const meta = await fetchComicMetadata(fullComic.title);
+              if (meta) {
+                const updatePayload = {
+                  type: meta.type,
+                  status: meta.status,
+                  rating: meta.rating,
+                  alt_titles: meta.alt_titles,
+                  updated_at: new Date().toISOString(),
+                };
+                if (meta.synopsis) updatePayload.synopsis = meta.synopsis;
+                if (meta.author && meta.author !== 'Unknown Author') updatePayload.author = meta.author;
+                if (meta.cover_url && (!fullComic.cover_url || fullComic.cover_url.includes('unsplash'))) {
+                  updatePayload.cover_url = meta.cover_url;
+                }
+                await supabase.from('comics').update(updatePayload).eq('id', fullComic.id);
+                if (meta.genres?.length) {
+                  await syncWorkerComicGenres(supabase, fullComic.id, meta.genres);
+                }
+                console.log(`   ✓ Data komik "${fullComic.title}" diperkaya dari ${meta.sourceApi.toUpperCase()}.`);
+              }
+            }
+          }
+
+          // 2. Cek apakah ada chapter baru dari card (hanya 1 chapter terbaru)
           if (item.latestChapter?.chapterNumber) {
             const chNum = item.latestChapter.chapterNumber;
             const { data: chExist } = await supabase
@@ -286,37 +361,18 @@ async function runCliSync() {
               await supabase.from('chapters').insert({
                 comic_id: existing.id,
                 chapter_number: chNum,
-                title: item.latestChapter.title,
+                title: item.latestChapter.title || `Chapter ${chNum}`,
                 status: 'published',
                 released_at: new Date().toISOString(),
               });
               newChapters++;
+              await supabase.from('comics').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
             }
           }
         }
 
-        // Jika komik baru atau belum punya chapter sama sekali di DB, ambil daftar chapter awal
-        if (comicId && browser) {
-          const { count } = await supabase
-            .from('chapters')
-            .select('id', { count: 'exact', head: true })
-            .eq('comic_id', comicId);
-
-          if (!count || count === 0) {
-            const chapters = await fetchComicChapters(browser, item.slug);
-            if (chapters.length > 0) {
-              const rows = chapters.map((ch) => ({
-                comic_id: comicId,
-                chapter_number: ch.chapter_number,
-                title: ch.title,
-                status: 'published',
-                released_at: new Date().toISOString(),
-              }));
-              await supabase.from('chapters').upsert(rows, { onConflict: 'comic_id,chapter_number' });
-              newChapters += chapters.length;
-            }
-          }
-        }
+        // Delay kecil agar ramah API AniList/Kitsu
+        await new Promise((r) => setTimeout(r, 250));
       }
     }
   } catch (err) {

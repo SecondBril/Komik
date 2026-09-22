@@ -48,13 +48,48 @@ function normalizeComicType(countryOrSubtype?: string | null): 'manga' | 'manhwa
   return 'manga';
 }
 
+export function cleanTitleForComparison(t?: string | null): string {
+  if (!t) return '';
+  return t
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’"”`]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export function isExactTitleMatch(query: string, candidates: (string | null | undefined)[]): boolean {
+  const cleanQ = cleanTitleForComparison(query);
+  if (!cleanQ) return false;
+  const cleanQNoThe = cleanQ.replace(/^the\s+/i, '');
+
+  for (const cand of candidates) {
+    if (!cand) continue;
+    const cleanC = cleanTitleForComparison(cand);
+    if (!cleanC) continue;
+    if (cleanQ === cleanC) return true;
+    const cleanCNoThe = cleanC.replace(/^the\s+/i, '');
+    if (cleanQNoThe.length > 2 && cleanQNoThe === cleanCNoThe) return true;
+  }
+  return false;
+}
+
 export async function fetchFromAniList(query: string): Promise<ComicMetadataResult | null> {
-  const cleanQuery = query.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const cleanQuery = query
+    .replace(/\s*-\s*.*$/, '')
+    .replace(/\s*bahasa\s+indonesia/gi, '')
+    .replace(/\s*\(\s*color\s*\)/gi, '')
+    .replace(/\s*\[\s*color\s*\]/gi, '')
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!cleanQuery) return null;
 
   const gql = `
     query ($search: String) {
-      Page(page: 1, perPage: 1) {
+      Page(page: 1, perPage: 6) {
         media(search: $search, type: MANGA) {
           id
           title {
@@ -102,7 +137,25 @@ export async function fetchFromAniList(query: string): Promise<ComicMetadataResu
 
     if (!res.ok) return null;
     const data = (await res.json()) as any;
-    const media = data.data?.Page?.media?.[0];
+    const mediaList = data.data?.Page?.media || [];
+    if (!Array.isArray(mediaList) || mediaList.length === 0) return null;
+
+    // Cari media yang judulnya sama persis (exact match)
+    let media: any = null;
+    for (const item of mediaList) {
+      const candidates = [
+        item.title?.english,
+        item.title?.romaji,
+        item.title?.native,
+        ...(Array.isArray(item.synonyms) ? item.synonyms : []),
+      ];
+      if (isExactTitleMatch(cleanQuery, candidates)) {
+        media = item;
+        break;
+      }
+    }
+
+    // Jika tidak ada judul yang sama persis, jangan ambil data AniList
     if (!media) return null;
 
     const mainTitle = media.title.english || media.title.romaji || cleanQuery;
@@ -167,18 +220,42 @@ export async function fetchFromAniList(query: string): Promise<ComicMetadataResu
 }
 
 export async function fetchFromKitsu(query: string): Promise<ComicMetadataResult | null> {
-  const cleanQuery = query.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const cleanQuery = query
+    .replace(/\s*-\s*.*$/, '')
+    .replace(/\s*bahasa\s+indonesia/gi, '')
+    .replace(/\s*\(\s*color\s*\)/gi, '')
+    .replace(/\s*\[\s*color\s*\]/gi, '')
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!cleanQuery) return null;
 
   try {
-    const url = `https://kitsu.io/api/edge/manga?filter[text]=${encodeURIComponent(cleanQuery)}&page[limit]=1`;
+    const url = `https://kitsu.io/api/edge/manga?filter[text]=${encodeURIComponent(cleanQuery)}&page[limit]=5`;
     const res = await fetch(url, {
       headers: { Accept: 'application/vnd.api+json' },
     });
 
     if (!res.ok) return null;
     const data = (await res.json()) as any;
-    const item = data.data?.[0];
+    const items = data.data || [];
+    if (!Array.isArray(items) || items.length === 0) return null;
+
+    let item: any = null;
+    for (const cand of items) {
+      const attr = cand.attributes;
+      if (!attr) continue;
+      const candidates = [
+        attr.canonicalTitle,
+        ...(attr.titles ? Object.values(attr.titles) : []),
+        ...(Array.isArray(attr.abbreviatedTitles) ? attr.abbreviatedTitles : []),
+      ];
+      if (isExactTitleMatch(cleanQuery, candidates as string[])) {
+        item = cand;
+        break;
+      }
+    }
+
     if (!item || !item.attributes) return null;
 
     const attr = item.attributes;
@@ -225,26 +302,52 @@ export async function fetchFromKitsu(query: string): Promise<ComicMetadataResult
 }
 
 export async function fetchFromMangaUpdates(query: string): Promise<ComicMetadataResult | null> {
-  const cleanQuery = query.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const cleanQuery = query
+    .replace(/\s*-\s*.*$/, '')
+    .replace(/\s*bahasa\s+indonesia/gi, '')
+    .replace(/\s*\(\s*color\s*\)/gi, '')
+    .replace(/\s*\[\s*color\s*\]/gi, '')
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!cleanQuery) return null;
 
   try {
     const searchRes = await fetch('https://api.mangaupdates.com/v1/series/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ search: cleanQuery, stype: 'title', perpage: 3 }),
+      body: JSON.stringify({ search: cleanQuery, stype: 'title', perpage: 5 }),
     });
 
     if (!searchRes.ok) return null;
     const searchData = await searchRes.json();
-    const hit = searchData.results?.[0]?.record;
-    if (!hit?.series_id) return null;
+    const hits = searchData.results || [];
+    if (!Array.isArray(hits) || hits.length === 0) return null;
 
-    const detailRes = await fetch(`https://api.mangaupdates.com/v1/series/${hit.series_id}`);
+    let matchedSeriesId: number | null = null;
+    let hitTitle = '';
+
+    for (const h of hits) {
+      const rec = h.record;
+      if (!rec?.series_id) continue;
+      const candidates = [
+        rec.title,
+        ...(Array.isArray(rec.associated) ? rec.associated.map((a: any) => a.title || a) : []),
+      ];
+      if (isExactTitleMatch(cleanQuery, candidates)) {
+        matchedSeriesId = rec.series_id;
+        hitTitle = rec.title || cleanQuery;
+        break;
+      }
+    }
+
+    if (!matchedSeriesId) return null;
+
+    const detailRes = await fetch(`https://api.mangaupdates.com/v1/series/${matchedSeriesId}`);
     if (!detailRes.ok) return null;
     const series = await detailRes.json();
 
-    const mainTitle = series.title || hit.title || cleanQuery;
+    const mainTitle = series.title || hitTitle || cleanQuery;
 
     const altSet = new Set<string>();
     if (Array.isArray(series.associated)) {
@@ -253,7 +356,7 @@ export async function fetchFromMangaUpdates(query: string): Promise<ComicMetadat
       });
     }
 
-    const rawType = (series.type || hit.type || '').toLowerCase();
+    const rawType = (series.type || '').toLowerCase();
     const comicType: 'manga' | 'manhwa' | 'manhua' =
       rawType === 'manhwa' ? 'manhwa' : rawType === 'manhua' ? 'manhua' : 'manga';
 
@@ -276,8 +379,8 @@ export async function fetchFromMangaUpdates(query: string): Promise<ComicMetadat
       rating = Number(Math.min(5.0, Math.max(1.0, series.bayesian_rating / 2)).toFixed(2));
     }
 
-    const coverUrl = series.image?.url?.original || hit.image?.url?.original || '';
-    const synopsis = cleanHtml(series.description || hit.description);
+    const coverUrl = series.image?.url?.original || '';
+    const synopsis = cleanHtml(series.description);
     const genres: string[] = (series.genres || []).map((g: any) => g.genre).filter(Boolean);
 
     return {

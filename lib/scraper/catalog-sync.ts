@@ -223,7 +223,8 @@ export async function syncWestmangaComics(options: { maxPages?: number } = {}): 
 
           const meta = await fetchComicMetadata(item.title).catch(() => null);
 
-          const finalTitle = meta?.title || detail?.title || item.title;
+          // Judul komik jangan dirubah (tetap gunakan item.title dari Westmanga)
+          const finalTitle = item.title;
           const finalType = (meta?.type as any) || item.type || 'manhwa';
           const finalSynopsis =
             meta?.synopsis ||
@@ -233,6 +234,14 @@ export async function syncWestmangaComics(options: { maxPages?: number } = {}): 
           const finalAuthor = meta?.author || 'Unknown Author';
           const finalRating = meta?.rating || 4.5;
           const finalStatus = (meta?.status as any) || 'ongoing';
+          const finalAltTitles = meta?.alt_titles || [];
+          if (
+            meta?.title &&
+            meta.title.toLowerCase() !== finalTitle.toLowerCase() &&
+            !finalAltTitles.includes(meta.title)
+          ) {
+            finalAltTitles.push(meta.title);
+          }
 
           // Insert ke tabel comics
           const { data: newComic, error: comicErr } = await supabase
@@ -246,6 +255,7 @@ export async function syncWestmangaComics(options: { maxPages?: number } = {}): 
               author: finalAuthor,
               rating: finalRating,
               status: finalStatus,
+              alt_titles: finalAltTitles,
             })
             .select('id, title, slug')
             .single();
@@ -264,35 +274,33 @@ export async function syncWestmangaComics(options: { maxPages?: number } = {}): 
             await syncWorkerComicGenres(supabase, newComic.id, meta.genres).catch(() => {});
           }
 
-          // Daftarkan chapter-chapter yang ditemukan (HANYA METADATA, TANPA GAMBAR)
-          const chaptersToInsert: any[] = [];
+          // Daftarkan HANYA 1 CHAPTER TERBARU (CUMA SATU CHAPTER SAJA)
+          let latestChapterNumber: number | undefined;
+          let latestChapterTitle: string | undefined;
 
           if (detail && detail.chapters.length > 0) {
-            detail.chapters.forEach((ch) => {
-              chaptersToInsert.push({
-                comic_id: newComic.id,
-                chapter_number: ch.chapterNumber,
-                title: ch.title,
-                status: 'published',
-                released_at: new Date().toISOString(),
-              });
-            });
+            const sortedCh = [...detail.chapters].sort((a, b) => b.chapterNumber - a.chapterNumber);
+            latestChapterNumber = sortedCh[0].chapterNumber;
+            latestChapterTitle = sortedCh[0].title;
           } else if (item.latestChapter?.chapterNumber) {
-            // Minimal daftarkan chapter terbaru
-            chaptersToInsert.push({
+            latestChapterNumber = item.latestChapter.chapterNumber;
+            latestChapterTitle = item.latestChapter.title;
+          }
+
+          if (latestChapterNumber !== undefined) {
+            const { error: chErr } = await supabase.from('chapters').insert({
               comic_id: newComic.id,
-              chapter_number: item.latestChapter.chapterNumber,
-              title: item.latestChapter.title || `Chapter ${item.latestChapter.chapterNumber}`,
+              chapter_number: latestChapterNumber,
+              title: latestChapterTitle || `Chapter ${latestChapterNumber}`,
               status: 'published',
               released_at: new Date().toISOString(),
             });
-          }
 
-          if (chaptersToInsert.length > 0) {
-            const { error: chErr } = await supabase.from('chapters').insert(chaptersToInsert);
             if (!chErr) {
-              stats.newChaptersAdded += chaptersToInsert.length;
-              console.log(`[CatalogSync] -> Berhasil mendaftarkan ${chaptersToInsert.length} chapter untuk "${newComic.title}"`);
+              stats.newChaptersAdded += 1;
+              console.log(
+                `[CatalogSync] -> Berhasil mendaftarkan 1 chapter terbaru (Chapter ${latestChapterNumber}) untuk "${newComic.title}"`
+              );
             }
           }
         } else {

@@ -126,15 +126,23 @@ async function runScraperWorker() {
           comicDetail.coverUrl ||
           'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
 
-        const finalTitle = metadata?.title || comicDetail.comicTitle;
+        // Judul komik jangan dirubah (tetap gunakan judul asli dari Westmanga)
+        const finalTitle = comicDetail.comicTitle;
         const finalType = metadata?.type || 'manhwa';
         const finalSynopsis =
           metadata?.synopsis ||
-          `Comic ${comicDetail.comicTitle} English description.`;
+          `Baca komik ${comicDetail.comicTitle} Bahasa Indonesia di Westmanga.`;
         const finalAuthor = metadata?.author || 'Unknown Author';
         const finalStatus = metadata?.status || 'ongoing';
         const finalRating = metadata?.rating || 4.5;
         const finalAltTitles = metadata?.alt_titles || [];
+        if (
+          metadata?.title &&
+          metadata.title.toLowerCase() !== finalTitle.toLowerCase() &&
+          !finalAltTitles.includes(metadata.title)
+        ) {
+          finalAltTitles.push(metadata.title);
+        }
 
         const { data: newComic, error: comicErr } = await supabase
           .from('comics')
@@ -166,9 +174,9 @@ async function runScraperWorker() {
           console.log(`[Scraper Worker] Synced ${metadata.genres.length} genres for "${comic.title}".`);
         }
       } else {
-        // If existing comic has default/placeholder data, enrich it automatically
+        // If existing comic has default/placeholder data, enrich it automatically (without changing title)
         const isUnknownAuthor = !comic.author || /unknown/i.test(comic.author);
-        const isDefaultSynopsis = !comic.synopsis || comic.synopsis.includes('terjemahan Bahasa Indonesia');
+        const isDefaultSynopsis = !comic.synopsis || comic.synopsis.includes('terjemahan Bahasa Indonesia') || comic.synopsis.includes('di Westmanga');
         if (isUnknownAuthor || isDefaultSynopsis) {
           console.log(`[Scraper Worker] Existing comic "${comic.title}" has default data. Auto-enriching from API...`);
           const meta = await fetchComicMetadata(comic.title);
@@ -192,7 +200,7 @@ async function runScraperWorker() {
         }
       }
 
-      // 3. DB-FIRST CHECK: Fetch ALL existing chapter records for this comic from Supabase
+      // 3. DB-FIRST CHECK: Fetch existing chapter records for this comic from Supabase
       const { data: existingChapters } = await supabase
         .from('chapters')
         .select('id, chapter_number, status, retry_count')
@@ -202,19 +210,26 @@ async function runScraperWorker() {
         (existingChapters || []).map((ch: any) => [Number(ch.chapter_number), ch])
       );
 
-      console.log(
-        `[Scraper Worker] Comic "${comic.title}" has ${existingChapterMap.size} existing chapters in DB. Total chapters available on site: ${comicDetail.chapters.length}.`
-      );
-
       // Helper to check if a page is already successfully uploaded to Cloud Storage
       const isAlreadyUploaded = (url: string | null | undefined) =>
         typeof url === 'string' &&
         (url.includes('ik.imagekit.io') || url.includes('/api/storage/onedrive')) &&
         !url.includes('error');
 
-      // 4. Iterate over ALL chapters discovered on site
-      for (const chItem of comicDetail.chapters) {
-        const existingChapter = existingChapterMap.get(chItem.chapterNumber);
+      // 4. HANYA AMBIL 1 CHAPTER TERBARU (CUMA SATU CHAPTER SAJA)
+      const sortedChapters = [...comicDetail.chapters].sort((a, b) => b.chapterNumber - a.chapterNumber);
+      const chItem = sortedChapters[0];
+
+      if (!chItem) {
+        console.log(`[Scraper Worker] Comic "${comic.title}" has no chapters available. Skipping.`);
+        continue;
+      }
+
+      console.log(
+        `[Scraper Worker] Comic "${comic.title}" -> Processing ONLY latest chapter: Chapter ${chItem.chapterNumber}`
+      );
+
+      const existingChapter = existingChapterMap.get(chItem.chapterNumber);
 
         if (existingChapter) {
           // If already published, skip (healthy chapter)
@@ -406,7 +421,6 @@ async function runScraperWorker() {
           existingChapterMap.set(chItem.chapterNumber, newChapter);
         }
       }
-    }
 
     console.log('\n[Scraper Worker] Ingestion run completed successfully.');
   } catch (err) {
