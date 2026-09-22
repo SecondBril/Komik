@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: "0 */2 * * *" # Berjalan otomatis setiap 2 jam
   workflow_dispatch: {}     # Dukungan trigger manual dari menu Actions di GitHub
+  push:
+    branches:
+      - main
 
 jobs:
   sync-catalog:
