@@ -27,6 +27,7 @@ import {
   X,
   Compass,
   Film,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function ComicDetailPage() {
@@ -52,8 +53,11 @@ export default function ComicDetailPage() {
       let chapterList = await getComicChapters(slug);
       setChapters(chapterList);
 
-      // Auto-healing fallback: jika komik memiliki 0 chapter, sinkronkan langsung dari Westmanga
-      if (chapterList.length === 0) {
+      // Auto-healing fallback: jika komik memiliki 0 chapter atau chapters tidak lengkap (misal count <= 6 atau terdapat selisih besar)
+      const maxCh = chapterList.length > 0 ? Math.max(...chapterList.map((c) => c.chapter_number)) : 0;
+      const isIncomplete = chapterList.length === 0 || chapterList.length <= 6 || (maxCh > 20 && chapterList.length <= 10) || (maxCh - chapterList.length > 5);
+
+      if (isIncomplete) {
         setIsSyncing(true);
         try {
           const syncRes = await fetch(`/api/comics/${slug}/sync`, { method: 'POST' });
@@ -124,6 +128,26 @@ export default function ComicDetailPage() {
     }
     loadData();
   }, [slug]);
+
+  const handleManualSync = async () => {
+    if (isSyncing || !slug) return;
+    setIsSyncing(true);
+    try {
+      const syncRes = await fetch(`/api/comics/${slug}/sync`, { method: 'POST' });
+      const syncJson = await syncRes.json();
+      if (syncJson.success) {
+        const reloaded = await getComicChapters(slug);
+        if (reloaded && reloaded.length > 0) {
+          setChapters(reloaded);
+        }
+      }
+    } catch (err) {
+      console.error('[ComicDetail] Manual sync failed:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
 
   // Sorted chapters descending
   const sortedChapters = useMemo(() => {
@@ -330,13 +354,24 @@ export default function ComicDetailPage() {
         <div className="w-full bg-white rounded-[32px] sm:rounded-[40px] border-[3px] border-[#1A1A1A] shadow-[6px_6px_0px_#1A1A1A] p-5 sm:p-8 flex flex-col gap-4 overflow-hidden box-border">
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b-2 border-[#1A1A1A]">
-            <div>
-              <h2 className="text-lg sm:text-xl font-black text-[#1A1A1A] tracking-tight">
-                Daftar Semua Chapter
-              </h2>
-              <span className="text-xs font-bold text-[#7A756D]">
-                Total {sortedChapters.length} chapter terbit
-              </span>
+            <div className="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
+              <div>
+                <h2 className="text-lg sm:text-xl font-black text-[#1A1A1A] tracking-tight">
+                  Daftar Semua Chapter
+                </h2>
+                <span className="text-xs font-bold text-[#7A756D]">
+                  Total {sortedChapters.length} chapter terbit
+                </span>
+              </div>
+              <button
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                title="Sinkronkan ulang chapter jika ada yang belum muncul"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black rounded-xl border-2 border-[#1A1A1A] bg-[#FAF7F0] hover:bg-[#EAE4D3] text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#2E7D6E]' : ''}`} />
+                <span>{isSyncing ? 'Menyinkronkan...' : 'Sync Chapter'}</span>
+              </button>
             </div>
 
             {/* Chapter Search Box */}

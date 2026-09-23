@@ -213,12 +213,32 @@ export async function scrapeLiveChapterPages(
     });
 
     // Variasi URL chapter di Westmanga:
-    const candidateSlugs = [
-      `${comicSlug}-chapter-${chapterNumber}`,
-      `${comicSlug}-chapter-${String(chapterNumber).padStart(2, '0')}`,
-      `${comicSlug}-chapter-${chapterNumber}-bahasa-indonesia`,
-      `${comicSlug}-chapter-${String(chapterNumber).padStart(2, '0')}-bahasa-indonesia`,
+    const numStr = String(chapterNumber);
+    const isDecimal = numStr.includes('.');
+    const padStr = isDecimal
+      ? numStr.split('.')[0].padStart(2, '0') + '.' + numStr.split('.')[1]
+      : numStr.padStart(2, '0');
+    const dashStr = numStr.replace('.', '-');
+    const padDashStr = padStr.replace('.', '-');
+
+    const rawCandidates = [
+      // Prioritaskan format standar Westmanga: pad 2 digit + bahasa-indonesia
+      `${comicSlug}-chapter-${padStr}-bahasa-indonesia`,
+      `${comicSlug}-chapter-${numStr}-bahasa-indonesia`,
+      ...(isDecimal ? [
+        `${comicSlug}-chapter-${padDashStr}-bahasa-indonesia`,
+        `${comicSlug}-chapter-${dashStr}-bahasa-indonesia`,
+      ] : []),
+      `${comicSlug}-chapter-${padStr}`,
+      `${comicSlug}-chapter-${numStr}`,
+      ...(isDecimal ? [
+        `${comicSlug}-chapter-${padDashStr}`,
+        `${comicSlug}-chapter-${dashStr}`,
+      ] : []),
     ];
+
+    // Deduplikasi kandidat slug agar tidak ada URL yang diuji 2 kali
+    const candidateSlugs = Array.from(new Set(rawCandidates));
 
     let success = false;
     for (const chSlug of candidateSlugs) {
@@ -231,9 +251,9 @@ export async function scrapeLiveChapterPages(
           timeout: 25000,
         });
 
-        // Tunggu maksimal 3.5 detik untuk respons API Mantweh
+        // Tunggu maksimal 4.5 detik untuk respons API Mantweh (akan langsung break begitu gambar tertangkap)
         const waitStart = Date.now();
-        while (capturedImages.length === 0 && Date.now() - waitStart < 3500) {
+        while (capturedImages.length === 0 && Date.now() - waitStart < 4500) {
           await new Promise((r) => setTimeout(r, 150));
         }
 

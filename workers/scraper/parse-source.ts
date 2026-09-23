@@ -156,9 +156,16 @@ export async function getComicDetailWithPuppeteer(
   try {
     await page.goto(sourceUrl, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
     try {
-      await page.waitForSelector('a[href*="/view/"]', { timeout: 10000 });
+      await page.waitForFunction(
+        (s) => {
+          const links = Array.from(document.querySelectorAll('a[href*="/view/"]'));
+          return links.some((a) => a.href.toLowerCase().includes(s.toLowerCase()));
+        },
+        { timeout: 10000 },
+        comicSlug
+      );
     } catch (e) {
-      await new Promise((r) => setTimeout(r, 4000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
 
     const title = await page.title();
@@ -185,6 +192,9 @@ export async function getComicDetailWithPuppeteer(
     const { chapterLinks, coverUrl } = await page.evaluate((targetSlug) => {
       // Primary: Look inside chapter list containers
       const containerSelectors = [
+        'div.grid-cols-12 a',
+        'div.grid[class*="grid-cols-"] a',
+        'div[class*="grid-cols-"] a',
         '#chapterlist a',
         '.clstyle a',
         '.bxcl a',

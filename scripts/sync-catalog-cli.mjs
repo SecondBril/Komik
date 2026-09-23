@@ -66,31 +66,52 @@ async function fetchComicChapters(browser, slug) {
   const page = await browser.newPage();
   try {
     const url = `https://v1.westmanga.my/comic/${slug}`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 35000 }).catch(() => {});
     try {
-      await page.waitForSelector('a[href*="/view/"]', { timeout: 5000 });
+      await page.waitForFunction(
+        (s) => {
+          const links = Array.from(document.querySelectorAll('a[href*="/view/"]'));
+          return links.some((a) => a.href.toLowerCase().includes(s.toLowerCase()));
+        },
+        { timeout: 10000 },
+        slug
+      );
     } catch {}
 
-    const html = await page.content();
-    const $ = cheerio.load(html);
-    const chapters = [];
-    const seenCh = new Set();
+    // Brief delay to allow full DOM hydration of all chapter items
+    await new Promise((r) => setTimeout(r, 1000));
 
-    $('a[href*="/view/"]').each((_, a) => {
-      const txt = $(a).text().trim();
-      const href = $(a).attr('href') || '';
-      const match = txt.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i) || href.match(/chapter-(\d+(?:[\.-]\d+)?)/i);
-      if (match) {
-        const chNum = parseFloat(match[1].replace('-', '.'));
-        if (!seenCh.has(chNum)) {
-          seenCh.add(chNum);
-          chapters.push({
-            chapter_number: chNum,
-            title: `Chapter ${chNum}`,
-          });
+    const chapters = await page.evaluate((targetSlug) => {
+      const cleanSlug = targetSlug.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const allLinks = Array.from(document.querySelectorAll('a[href*="/view/"]'));
+      const seen = new Set();
+      const result = [];
+
+      allLinks.forEach((a) => {
+        const href = a.href || '';
+        const text = a.textContent?.trim() || '';
+
+        // Strict filter: link must belong to this specific comic
+        const cleanHref = href.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!cleanHref.includes(cleanSlug) && !href.toLowerCase().includes(targetSlug.toLowerCase())) {
+          return; // Skip recommendations / sidebar links from other comics
         }
-      }
-    });
+
+        const match = text.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i) || href.match(/chapter-(\d+(?:[\.-]\d+)?)/i);
+        if (match) {
+          const chNum = parseFloat(match[1].replace('-', '.'));
+          if (!seen.has(chNum) && chNum > 0) {
+            seen.add(chNum);
+            result.push({
+              chapter_number: chNum,
+              title: text.replace(/\s+/g, ' ').trim() || `Chapter ${chNum}`,
+            });
+          }
+        }
+      });
+
+      return result.sort((a, b) => b.chapter_number - a.chapter_number);
+    }, slug);
 
     return chapters;
   } catch (err) {
@@ -413,10 +434,15 @@ async function runCliSync() {
                 status: 'published',
                 released_at: new Date().toISOString(),
               }));
-              const { data: insertedChs } = await supabase
-                .from('chapters')
-                .upsert(rows, { onConflict: 'comic_id,chapter_number' })
-                .select('id, chapter_number');
+              let insertedChs = [];
+              for (let i = 0; i < rows.length; i += 100) {
+                const batch = rows.slice(i, i + 100);
+                const { data: bData } = await supabase
+                  .from('chapters')
+                  .upsert(batch, { onConflict: 'comic_id,chapter_number' })
+                  .select('id, chapter_number');
+                if (bData) insertedChs = insertedChs.concat(bData);
+              }
               newChapters += chapters.length;
               console.log(`     ✓ Mendaftarkan ${chapters.length} chapter (semua chapter tampil di web).`);
 
@@ -490,16 +516,35 @@ async function runCliSync() {
             }
           }
 
-          // 2. Jika komik di DB hanya punya 0 atau 1 chapter, lengkapi semua chapternya agar tampil di web
+          // 2. Jika komik di DB hanya punya <= 6 chapter atau tidak lengkap
           if (browser) {
             const { count } = await supabase
               .from('chapters')
               .select('id', { count: 'exact', head: true })
               .eq('comic_id', existing.id);
 
-            if (!count || count <= 1) {
+            const cardLatestCh = item.latestChapter?.chapterNumber || 0;
+            const isIncomplete = !count || count <= 6 || (cardLatestCh > 10 && count <= 10);
+
+            if (isIncomplete) {
               const chapters = await fetchComicChapters(browser, item.slug);
-              if (chapters.length > 1) {
+              if (chapters.length > 0) {
+                const validNums = new Set(chapters.map((c) => c.chapter_number));
+                const { data: dbChs } = await supabase
+                  .from('chapters')
+                  .select('id, chapter_number')
+                  .eq('comic_id', existing.id);
+
+                if (dbChs && dbChs.length > 0) {
+                  const ghostChs = dbChs.filter((c) => !validNums.has(c.chapter_number));
+                  if (ghostChs.length > 0) {
+                    const ghostIds = ghostChs.map((c) => c.id);
+                    await supabase.from('chapter_pages').delete().in('chapter_id', ghostIds);
+                    await supabase.from('chapters').delete().in('id', ghostIds);
+                    console.log(`     ✓ Dihapus ${ghostIds.length} chapter fiktif untuk "${existing.title}".`);
+                  }
+                }
+
                 const rows = chapters.map((ch) => ({
                   comic_id: existing.id,
                   chapter_number: ch.chapter_number,
@@ -507,8 +552,11 @@ async function runCliSync() {
                   status: 'published',
                   released_at: new Date().toISOString(),
                 }));
-                await supabase.from('chapters').upsert(rows, { onConflict: 'comic_id,chapter_number' });
-                newChapters += (chapters.length - (count || 0));
+                for (let i = 0; i < rows.length; i += 100) {
+                  const batch = rows.slice(i, i + 100);
+                  await supabase.from('chapters').upsert(batch, { onConflict: 'comic_id,chapter_number' });
+                }
+                newChapters += Math.max(0, chapters.length - (count || 0));
                 console.log(`   + Memperbarui daftar chapter "${existing.title}": ${chapters.length} chapter sekarang lengkap.`);
               }
             }

@@ -52,19 +52,37 @@ async function extractComicDetailWithPuppeteer(
 } | null> {
   const page = await browser.newPage();
   try {
-    // Intersep request untuk mempercepat loading
+    // Intersep hanya tracker / ads / fonts agar styling dan DOM hydration tetap berjalan sempurna
     await page.setRequestInterception(true);
     page.on('request', (req) => {
+      const url = req.url();
       const type = req.resourceType();
-      if (type === 'image' || type === 'font' || type === 'stylesheet') {
+      if (
+        type === 'font' ||
+        url.includes('google-analytics') ||
+        url.includes('googletagmanager') ||
+        url.includes('histats') ||
+        url.includes('cloudflareinsights')
+      ) {
         req.abort().catch(() => {});
       } else {
         req.continue().catch(() => {});
       }
     });
 
-    await page.goto(comicUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise((r) => setTimeout(r, 2000));
+    await page.goto(comicUrl, { waitUntil: 'networkidle2', timeout: 35000 }).catch(() => {});
+
+    // Tunggu sampai link chapter milik slug komik ter-render
+    await page.waitForFunction(
+      (s: string) => {
+        const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/view/"]'));
+        return links.some((a) => (a.href || '').toLowerCase().includes(s.toLowerCase()));
+      },
+      { timeout: 10000 },
+      slug
+    ).catch(() => {});
+
+    await new Promise((r) => setTimeout(r, 1000));
 
     const data = await page.evaluate((targetSlug) => {
       // 1. Ekstrak Judul
@@ -83,14 +101,23 @@ async function extractComicDetailWithPuppeteer(
       );
       const coverUrl = img?.src || img?.getAttribute('data-src') || '';
 
-      // 4. Ekstrak Semua Chapter
+      // 4. Ekstrak Semua Chapter dengan filter slug ketat
       const chLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/view/"]'));
       const parsedChapters: Array<{ chapterNumber: number; title: string }> = [];
       const seenNums = new Set<number>();
+      const cleanSlug = targetSlug ? targetSlug.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
 
       chLinks.forEach((a) => {
         const href = a.href || '';
         const text = a.textContent?.trim() || '';
+
+        // Strict filter: harus milik komik ini, bukan rekomendasi/sidebar komik lain
+        if (cleanSlug) {
+          const cleanHref = href.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!cleanHref.includes(cleanSlug) && !href.toLowerCase().includes(targetSlug.toLowerCase())) {
+            return;
+          }
+        }
 
         // Match chapter number
         const match =
@@ -103,7 +130,7 @@ async function extractComicDetailWithPuppeteer(
             seenNums.add(num);
             parsedChapters.push({
               chapterNumber: num,
-              title: text || `Chapter ${num}`,
+              title: text.replace(/\s+/g, ' ').trim() || `Chapter ${num}`,
             });
           }
         }
@@ -430,8 +457,27 @@ export async function syncSingleComic(slug: string): Promise<{
       }
     }
 
-    // Upsert chapters
+    // Upsert chapters in batches of 100 and purge any bogus/ghost chapters from DB
     if (detail.chapters.length > 0) {
+      const validNums = new Set(detail.chapters.map((ch) => ch.chapterNumber));
+
+      // 1. Bersihkan chapter fiktif/hantu (misal chapter sidebar 169, 27, dll yang sebelumnya salah masuk)
+      const { data: dbChs } = await supabase
+        .from('chapters')
+        .select('id, chapter_number')
+        .eq('comic_id', comic.id);
+
+      if (dbChs && dbChs.length > 0) {
+        const ghostChs = dbChs.filter((ch) => !validNums.has(ch.chapter_number));
+        if (ghostChs.length > 0) {
+          const ghostIds = ghostChs.map((ch) => ch.id);
+          await supabase.from('chapter_pages').delete().in('chapter_id', ghostIds);
+          await supabase.from('chapters').delete().in('id', ghostIds);
+          console.log(`[CatalogSync] Berhasil menghapus ${ghostIds.length} chapter fiktif untuk "${slug}".`);
+        }
+      }
+
+      // 2. Simpan semua chapter resmi yang valid
       const chaptersToInsert = detail.chapters.map((ch) => ({
         comic_id: comic.id,
         chapter_number: ch.chapterNumber,
@@ -440,9 +486,14 @@ export async function syncSingleComic(slug: string): Promise<{
         released_at: new Date().toISOString(),
       }));
 
-      await supabase
-        .from('chapters')
-        .upsert(chaptersToInsert, { onConflict: 'comic_id, chapter_number', ignoreDuplicates: true });
+      for (let i = 0; i < chaptersToInsert.length; i += 100) {
+        const batch = chaptersToInsert.slice(i, i + 100);
+        await supabase
+          .from('chapters')
+          .upsert(batch, { onConflict: 'comic_id,chapter_number' });
+      }
+
+      await supabase.from('comics').update({ updated_at: new Date().toISOString() }).eq('id', comic.id);
     }
 
     return {
