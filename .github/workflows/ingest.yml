@@ -34,7 +34,7 @@ jobs:
   # ====================================================================
   quick-sync:
     name: Quick Sync (Pages 1-5)
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'quick') }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'quick') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -72,8 +72,8 @@ jobs:
   # Selesai dalam ~10-15 menit!
   # ====================================================================
   matrix-full-sync:
-    name: Sync Shard ${{ matrix.shard.index + 1 }}/20 (P${{ matrix.shard.start }}-${{ matrix.shard.end }})
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'full_sync' }}
+    name: Sync Shard ${{ matrix.shard.id }}/20 (P${{ matrix.shard.start }}-${{ matrix.shard.end }})
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'full_sync' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -81,26 +81,26 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - { index: 0, start: 1, end: 14 }
-          - { index: 1, start: 15, end: 28 }
-          - { index: 2, start: 29, end: 42 }
-          - { index: 3, start: 43, end: 56 }
-          - { index: 4, start: 57, end: 70 }
-          - { index: 5, start: 71, end: 84 }
-          - { index: 6, start: 85, end: 98 }
-          - { index: 7, start: 99, end: 112 }
-          - { index: 8, start: 113, end: 126 }
-          - { index: 9, start: 127, end: 140 }
-          - { index: 10, start: 141, end: 154 }
-          - { index: 11, start: 155, end: 168 }
-          - { index: 12, start: 169, end: 182 }
-          - { index: 13, start: 183, end: 196 }
-          - { index: 14, start: 197, end: 210 }
-          - { index: 15, start: 211, end: 224 }
-          - { index: 16, start: 225, end: 238 }
-          - { index: 17, start: 239, end: 250 }
-          - { index: 18, start: 251, end: 260 }
-          - { index: 19, start: 261, end: 270 }
+          - { id: 1, start: 1, end: 14 }
+          - { id: 2, start: 15, end: 28 }
+          - { id: 3, start: 29, end: 42 }
+          - { id: 4, start: 43, end: 56 }
+          - { id: 5, start: 57, end: 70 }
+          - { id: 6, start: 71, end: 84 }
+          - { id: 7, start: 85, end: 98 }
+          - { id: 8, start: 99, end: 112 }
+          - { id: 9, start: 113, end: 126 }
+          - { id: 10, start: 127, end: 140 }
+          - { id: 11, start: 141, end: 154 }
+          - { id: 12, start: 155, end: 168 }
+          - { id: 13, start: 169, end: 182 }
+          - { id: 14, start: 183, end: 196 }
+          - { id: 15, start: 197, end: 210 }
+          - { id: 16, start: 211, end: 224 }
+          - { id: 17, start: 225, end: 238 }
+          - { id: 18, start: 239, end: 250 }
+          - { id: 19, start: 251, end: 260 }
+          - { id: 20, start: 261, end: 270 }
 
     steps:
       - name: Checkout Repository
@@ -137,15 +137,35 @@ jobs:
   # Selesai dalam ~45-60 menit untuk seluruh database!
   # ====================================================================
   matrix-repair-images:
-    name: Repair Shard ${{ matrix.shard + 1 }}/20
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'repair_all' }}
+    name: Repair Shard ${{ matrix.shard.id }}/20
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'repair_all' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+        shard:
+          - { id: 1, index: 0 }
+          - { id: 2, index: 1 }
+          - { id: 3, index: 2 }
+          - { id: 4, index: 3 }
+          - { id: 5, index: 4 }
+          - { id: 6, index: 5 }
+          - { id: 7, index: 6 }
+          - { id: 8, index: 7 }
+          - { id: 9, index: 8 }
+          - { id: 10, index: 9 }
+          - { id: 11, index: 10 }
+          - { id: 12, index: 11 }
+          - { id: 13, index: 12 }
+          - { id: 14, index: 13 }
+          - { id: 15, index: 14 }
+          - { id: 16, index: 15 }
+          - { id: 17, index: 16 }
+          - { id: 18, index: 17 }
+          - { id: 19, index: 18 }
+          - { id: 20, index: 19 }
 
     steps:
       - name: Checkout Repository
@@ -172,9 +192,9 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_INDEX: ${{ matrix.shard.index }}
           TOTAL_SHARDS: "20"
-          MAX_CHAPTERS_PER_COMIC: ${{ github.event.inputs.max_chapters_per_comic || '0' }}
+          MAX_CHAPTERS_PER_COMIC: ${{ inputs.max_chapters_per_comic }}
 
   # ====================================================================
   # JOB 4: QUICK REPAIR & REPAIR SINGLE
@@ -182,7 +202,7 @@ jobs:
   # ====================================================================
   quick-repair:
     name: Quick / Single Comic Image Repair
-    if: ${{ (github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'quick' || github.event.inputs.mode == 'repair_single'))) }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'quick' || inputs.mode == 'repair_single')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -204,12 +224,12 @@ jobs:
         run: npm ci
 
       - name: Run Quick / Single Repair
-        run: node scripts/repair-missing-pages.mjs ${{ github.event.inputs.comic_slug || '' }}
+        run: node scripts/repair-missing-pages.mjs ${{ inputs.comic_slug }}
         env:
           PUPPETEER_EXECUTABLE_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          REPAIR_LIMIT: ${{ github.event.inputs.mode == 'repair_single' && '1' || '20' }}
-          MAX_CHAPTERS_PER_COMIC: ${{ github.event.inputs.max_chapters_per_comic || '10' }}
+          REPAIR_LIMIT: "25"
+          MAX_CHAPTERS_PER_COMIC: "10"
