@@ -2,26 +2,41 @@ name: Auto-Sync Comic Catalog & Chapters
 
 on:
   schedule:
-    - cron: "0 */2 * * *" # Berjalan otomatis setiap 2 jam
+    - cron: "0 */2 * * *" # Berjalan otomatis setiap 2 jam (Quick Sync + Quick Repair)
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Pilih Mode Eksekusi'
+        type: choice
+        options:
+          - 'quick'          # Quick Sync (Halaman 1-5) + Quick Repair (~3-5 menit)
+          - 'full_sync'      # 20 Runner Paralel: Sync 270 Halaman Katalog (~10-15 menit)
+          - 'repair_all'     # 20 Runner Paralel: Perbaiki Seluruh Gambar Komik di Database (~45-60 menit)
+          - 'repair_single'  # Repair 1 komik spesifik berdasarkan slug
+        default: 'quick'
       comic_slug:
-        description: 'Slug komik spesifik untuk diperbaiki (kosongkan jika ingin auto-repair komik yang belum lengkap)'
+        description: 'Slug komik spesifik (hanya jika mode repair_single)'
         required: false
         default: ''
-      repair_only:
-        description: 'Hanya jalankan repair gambar chapter (lewati sync catalog)?'
-        type: boolean
-        default: false
+      max_chapters_per_comic:
+        description: 'Batas chapter per komik untuk repair (0 = semua chapter, misal: 10 untuk 10 ch terbaru)'
+        required: false
+        default: '0'
   push:
     branches:
       - main
 
 jobs:
-  sync-catalog:
-    name: Sync Comic Metadata & Real Chapter Images
+  # ====================================================================
+  # JOB 1: QUICK SYNC (Halaman 1-5)
+  # Berjalan otomatis setiap 2 jam, push, atau saat mode 'quick'
+  # Selesai hanya dalam 2-4 menit!
+  # ====================================================================
+  quick-sync:
+    name: Quick Sync (Pages 1-5)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'quick') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Repository
@@ -40,18 +55,155 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Run Auto-Sync Catalog & New Chapters
-        if: ${{ !inputs.repair_only }}
-        run: npm run sync-comics
+      - name: Run Quick Sync (Pages 1-5)
+        run: npx tsx scripts/sync-catalog-cli.mjs 1 5
         env:
           PUPPETEER_EXECUTABLE_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SYNC_MAX_PAGES: "300"
+          START_PAGE: "1"
+          END_PAGE: "5"
 
-      - name: Run Auto-Repair Missing Chapter Pages
+  # ====================================================================
+  # JOB 2: MATRIX FULL SYNC (20 RUNNER PARALEL: Halaman 1-270)
+  # 20 runner berjalan serentak, masing-masing hanya menangani ~13-14 halaman!
+  # Selesai dalam ~10-15 menit!
+  # ====================================================================
+  matrix-full-sync:
+    name: Sync Shard ${{ matrix.shard.index + 1 }}/20 (P${{ matrix.shard.start }}-${{ matrix.shard.end }})
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'full_sync' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - { index: 0, start: 1, end: 14 }
+          - { index: 1, start: 15, end: 28 }
+          - { index: 2, start: 29, end: 42 }
+          - { index: 3, start: 43, end: 56 }
+          - { index: 4, start: 57, end: 70 }
+          - { index: 5, start: 71, end: 84 }
+          - { index: 6, start: 85, end: 98 }
+          - { index: 7, start: 99, end: 112 }
+          - { index: 8, start: 113, end: 126 }
+          - { index: 9, start: 127, end: 140 }
+          - { index: 10, start: 141, end: 154 }
+          - { index: 11, start: 155, end: 168 }
+          - { index: 12, start: 169, end: 182 }
+          - { index: 13, start: 183, end: 196 }
+          - { index: 14, start: 197, end: 210 }
+          - { index: 15, start: 211, end: 224 }
+          - { index: 16, start: 225, end: 238 }
+          - { index: 17, start: 239, end: 250 }
+          - { index: 18, start: 251, end: 260 }
+          - { index: 19, start: 261, end: 270 }
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Google Chrome Headless
+        uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Shard Sync (Pages ${{ matrix.shard.start }}-${{ matrix.shard.end }})
+        run: npx tsx scripts/sync-catalog-cli.mjs ${{ matrix.shard.start }} ${{ matrix.shard.end }}
+        env:
+          PUPPETEER_EXECUTABLE_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          START_PAGE: ${{ matrix.shard.start }}
+          END_PAGE: ${{ matrix.shard.end }}
+
+  # ====================================================================
+  # JOB 3: MATRIX REPAIR ALL (20 RUNNER PARALEL UNTUK PERBAIKAN GAMBAR)
+  # Membagi seluruh komik di database ke 20 runner secara bersamaan!
+  # Setiap runner hanya menggarap 1/20 dari total komik.
+  # Selesai dalam ~45-60 menit untuk seluruh database!
+  # ====================================================================
+  matrix-repair-images:
+    name: Repair Shard ${{ matrix.shard + 1 }}/20
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'repair_all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Google Chrome Headless
+        uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Distributed Shard Repair
+        run: node scripts/repair-missing-pages.mjs
+        env:
+          PUPPETEER_EXECUTABLE_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          TOTAL_SHARDS: "20"
+          MAX_CHAPTERS_PER_COMIC: ${{ github.event.inputs.max_chapters_per_comic || '0' }}
+
+  # ====================================================================
+  # JOB 4: QUICK REPAIR & REPAIR SINGLE
+  # Berjalan saat cron rutin (tapi dibatasi 20 komik terbaru), atau single slug
+  # ====================================================================
+  quick-repair:
+    name: Quick / Single Comic Image Repair
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'quick' || github.event.inputs.mode == 'repair_single'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Google Chrome Headless
+        uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Quick / Single Repair
         run: node scripts/repair-missing-pages.mjs ${{ github.event.inputs.comic_slug || '' }}
         env:
           PUPPETEER_EXECUTABLE_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
@@ -59,4 +211,5 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          REPAIR_LIMIT: "30"
+          REPAIR_LIMIT: ${{ github.event.inputs.mode == 'repair_single' && '1' || '20' }}
+          MAX_CHAPTERS_PER_COMIC: ${{ github.event.inputs.max_chapters_per_comic || '10' }}

@@ -158,7 +158,7 @@ function getCandidateChapterUrls(slug, chapterNumber) {
   return urls;
 }
 
-async function scrapeComicChaptersPages(browser, comic) {
+async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
   console.log(`\n======================================================`);
   console.log(`📖 Memproses Komik: "${comic.title}" (${comic.slug})`);
   console.log(`======================================================`);
@@ -175,7 +175,7 @@ async function scrapeComicChaptersPages(browser, comic) {
     return 0;
   }
 
-  const missingChapters = dbChapters.filter(
+  let missingChapters = dbChapters.filter(
     (ch) => !ch.chapter_pages || ch.chapter_pages.length === 0
   );
 
@@ -184,7 +184,12 @@ async function scrapeComicChaptersPages(browser, comic) {
     return 0;
   }
 
-  console.log(`   ⚠️ Ditemukan ${missingChapters.length}/${dbChapters.length} chapter yang belum punya gambar!`);
+  if (maxChapters > 0 && missingChapters.length > maxChapters) {
+    console.log(`   ⚡ Dibatasi ${maxChapters} chapter terbaru (dari total ${missingChapters.length} chapter tanpa gambar).`);
+    missingChapters = missingChapters.sort((a, b) => b.chapter_number - a.chapter_number).slice(0, maxChapters);
+  }
+
+  console.log(`   ⚠️ Memproses ${missingChapters.length} chapter yang belum punya gambar...`);
 
   // 2. Kunjungi halaman komik di Westmanga untuk memetakan tautan chapter yang aktif
   const mapPage = await browser.newPage();
@@ -357,8 +362,11 @@ async function scrapeComicChaptersPages(browser, comic) {
 }
 
 async function main() {
-  const targetSlug = process.argv[2];
-  const limitCount = parseInt(process.env.REPAIR_LIMIT || '25', 10);
+  const targetSlug = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null;
+  const shardIndex = parseInt(process.env.SHARD_INDEX || '0', 10);
+  const totalShards = parseInt(process.env.TOTAL_SHARDS || '1', 10);
+  const maxChaptersPerComic = parseInt(process.env.MAX_CHAPTERS_PER_COMIC || '0', 10);
+  const limitCount = parseInt(process.env.REPAIR_LIMIT || '0', 10); // 0 = all comics in this shard
 
   const chromePath = getChromeExecutablePath();
   if (!chromePath) {
@@ -385,24 +393,61 @@ async function main() {
         process.exit(1);
       }
 
-      await scrapeComicChaptersPages(browser, comic);
+      await scrapeComicChaptersPages(browser, comic, maxChaptersPerComic);
     } else {
-      console.log(`🔍 Memindai komik terbaru yang memiliki chapter tanpa halaman gambar (limit: ${limitCount})...`);
+      console.log(`\n======================================================`);
+      console.log(`🚀 REPAIR RUNNER [Shard ${shardIndex + 1}/${totalShards}]`);
+      if (maxChaptersPerComic > 0) {
+        console.log(`⚡ Batas chapter per komik: ${maxChaptersPerComic} chapter terbaru`);
+      }
+      console.log(`======================================================\n`);
 
-      const { data: comics } = await supabase
+      // Ambil semua komik di database
+      const { data: allComics, error: cErr } = await supabase
         .from('comics')
         .select('id, title, slug')
-        .order('created_at', { ascending: false })
-        .limit(limitCount);
+        .order('id', { ascending: true });
 
-      if (!comics || comics.length === 0) {
-        console.log('Tidak ada komik di database.');
+      if (cErr || !allComics || allComics.length === 0) {
+        console.log('Tidak ada komik ditemukan di database.');
         return;
       }
 
-      for (const comic of comics) {
-        await scrapeComicChaptersPages(browser, comic);
+      // Bagi beban komik secara merata ke shard ini
+      const myComics = totalShards > 1
+        ? allComics.filter((_, idx) => idx % totalShards === shardIndex)
+        : allComics;
+
+      console.log(`📊 Shard ini menangani ${myComics.length} komik (dari total ${allComics.length} komik di database).\n`);
+
+      let processedCount = 0;
+      let repairedCount = 0;
+
+      for (let i = 0; i < myComics.length; i++) {
+        if (limitCount > 0 && repairedCount >= limitCount) {
+          console.log(`\nSudah mencapai batas limit repair (${limitCount} komik).`);
+          break;
+        }
+
+        const comic = myComics[i];
+        console.log(`\n[${i + 1}/${myComics.length}] Memeriksa: "${comic.title}" (${comic.slug})`);
+
+        const restored = await scrapeComicChaptersPages(browser, comic, maxChaptersPerComic);
+        if (restored > 0) {
+          repairedCount++;
+          await supabase
+            .from('comics')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', comic.id);
+        }
+        processedCount++;
       }
+
+      console.log(`\n======================================================`);
+      console.log(`🎉 [Shard ${shardIndex + 1}/${totalShards}] Selesai!`);
+      console.log(`   Komik diperiksa  : ${processedCount}`);
+      console.log(`   Komik diperbaiki : ${repairedCount}`);
+      console.log(`======================================================\n`);
     }
   } finally {
     await browser.close();

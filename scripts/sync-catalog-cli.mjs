@@ -252,24 +252,37 @@ async function runCliSync() {
     }
   }
 
-  // Support argument: node scripts/sync-catalog-cli.mjs 1000 or env SYNC_MAX_PAGES
-  // Defaults to 300 pages (covers full 270 pages on Westmanga)
-  const maxRequestedPages = parseInt(process.argv[2] || process.env.SYNC_MAX_PAGES || '300', 10);
-  console.log(`Batas maksimal scanning: hingga ${maxRequestedPages} halaman.`);
+  // Support arguments:
+  // 1. node scripts/sync-catalog-cli.mjs <startPage> <endPage>
+  // 2. Or env vars START_PAGE, END_PAGE, or SYNC_MAX_PAGES
+  let startPage = 1;
+  let endPage = 270;
+
+  if (process.argv[2] && process.argv[3]) {
+    startPage = parseInt(process.argv[2], 10);
+    endPage = parseInt(process.argv[3], 10);
+  } else if (process.env.START_PAGE || process.env.END_PAGE) {
+    startPage = parseInt(process.env.START_PAGE || '1', 10);
+    endPage = parseInt(process.env.END_PAGE || process.env.SYNC_MAX_PAGES || '270', 10);
+  } else if (process.argv[2]) {
+    endPage = parseInt(process.argv[2], 10);
+  } else if (process.env.SYNC_MAX_PAGES) {
+    endPage = parseInt(process.env.SYNC_MAX_PAGES, 10);
+  }
+
+  if (isNaN(startPage) || startPage < 1) startPage = 1;
+  if (isNaN(endPage) || endPage < startPage) endPage = startPage;
+
+  console.log(`Batas scanning: Halaman ${startPage} hingga ${endPage} (Total catalog: ~270 halaman).`);
 
   let newComics = 0;
   let newChapters = 0;
   let totalDetectedPages = 270; // Westmanga catalog total is 270 pages (6,742 comics)
 
   try {
-    for (let page = 1; page <= maxRequestedPages; page++) {
-      if (page > totalDetectedPages) {
-        console.log(`\nSudah mencapai halaman terakhir katalog (${totalDetectedPages}). Selesai.`);
-        break;
-      }
-
+    for (let page = startPage; page <= Math.min(endPage, totalDetectedPages); page++) {
       const url = `https://v1.westmanga.my/contents?page=${page}`;
-      console.log(`\n[Halaman ${page}/${Math.min(maxRequestedPages, totalDetectedPages)}] Scanning ${url}...`);
+      console.log(`\n[Halaman ${page}/${Math.min(endPage, totalDetectedPages)}] Scanning ${url}...`);
 
       let html = '';
       if (browser) {
