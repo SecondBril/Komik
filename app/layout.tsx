@@ -47,8 +47,8 @@ export default function RootLayout({
     <html lang="id" className={`dark ${plusJakartaSans.variable} ${nunito.variable}`}>
       <head>
         {/* Preconnect to external image CDNs for ultra-fast LCP */}
-        <link rel="preconnect" href="https://storage.westmanga.blog" crossOrigin="anonymous" />
-        <link rel="preconnect" href="https://ik.imagekit.io" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://storage.westmanga.blog" />
+        <link rel="preconnect" href="https://ik.imagekit.io" />
         <link rel="dns-prefetch" href="https://storage.westmanga.blog" />
         <link rel="dns-prefetch" href="https://ik.imagekit.io" />
       </head>

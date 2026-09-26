@@ -161,9 +161,9 @@ export default async function HomePage() {
         </div>
 
         <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x scrollbar-thin">
-          {popularComics.map((comic, idx) => (
+          {popularComics.map((comic) => (
             <div key={comic.id} className="w-40 sm:w-48 shrink-0 snap-start">
-              <ComicCard comic={comic} priority={idx < 2} />
+              <ComicCard comic={comic} priority={false} />
             </div>
           ))}
         </div>
@@ -189,8 +189,8 @@ export default async function HomePage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-          {latestComics.slice(0, 18).map((comic, index) => (
-            <ComicCard key={comic.id} comic={comic} priority={index < 4} />
+          {latestComics.slice(0, 18).map((comic) => (
+            <ComicCard key={comic.id} comic={comic} priority={false} />
           ))}
         </div>
       </section>

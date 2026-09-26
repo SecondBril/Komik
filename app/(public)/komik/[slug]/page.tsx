@@ -221,6 +221,7 @@ export default function ComicDetailPage() {
                   alt={comic.title}
                   fill
                   priority
+                  sizes="(max-width: 640px) 240px, 280px"
                   className="object-cover"
                 />
                 <div className="absolute top-2.5 left-2.5">
