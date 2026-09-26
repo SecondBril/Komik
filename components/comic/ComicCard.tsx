@@ -36,8 +36,8 @@ export const ComicCard: React.FC<ComicCardProps> = ({ comic, priority = false })
           src={coverSrc}
           alt={`${comic.title} Cover`}
           fill
-          unoptimized
-          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+          quality={70}
+          sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 180px"
           priority={priority}
           loading={priority ? undefined : 'lazy'}
           decoding="async"

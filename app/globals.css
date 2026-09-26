@@ -15,7 +15,7 @@
 body {
   background-color: #F7F2E6;
   color: #1A1A1A;
-  font-family: var(--font-plus-jakarta), var(--font-nunito), system-ui, -apple-system, sans-serif;
+  font-family: var(--font-plus-jakarta), system-ui, -apple-system, sans-serif;
   overflow-x: clip;
   min-height: 100vh;
   -webkit-tap-highlight-color: transparent;

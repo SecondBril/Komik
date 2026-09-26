@@ -81,6 +81,7 @@ export default async function HomePage() {
               alt={featuredComic.title}
               fill
               priority
+              quality={70}
               sizes="(max-width: 640px) 100vw, (max-width: 1200px) 90vw, 1152px"
               className="object-cover group-hover:scale-105 transition-transform duration-300 opacity-90"
             />

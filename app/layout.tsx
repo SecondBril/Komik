@@ -1,21 +1,18 @@
 import type { Metadata, Viewport } from 'next';
+import dynamic from 'next/dynamic';
 import './globals.css';
-import { SecretEightClickListener } from '@/components/mature/SecretEightClickListener';
 import { SpeedInsights } from '@vercel/speed-insights/next';
-import { Plus_Jakarta_Sans, Nunito } from 'next/font/google';
+import { Plus_Jakarta_Sans } from 'next/font/google';
+
+const SecretEightClickListener = dynamic(
+  () => import('@/components/mature/SecretEightClickListener').then((m) => m.SecretEightClickListener),
+  { ssr: false }
+);
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
   display: 'swap',
   variable: '--font-plus-jakarta',
-});
-
-const nunito = Nunito({
-  subsets: ['latin'],
-  weight: ['400', '600', '700', '800', '900'],
-  display: 'swap',
-  variable: '--font-nunito',
 });
 
 export const metadata: Metadata = {
@@ -44,7 +41,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className={`dark ${plusJakartaSans.variable} ${nunito.variable}`}>
+    <html lang="id" className={`dark ${plusJakartaSans.variable}`}>
       <head>
         {/* Preconnect to external image CDNs for ultra-fast LCP */}
         <link rel="preconnect" href="https://storage.westmanga.blog" />
