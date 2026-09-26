@@ -2,6 +2,15 @@ import { Comic, FilterState, Genre } from '../types';
 import { MOCK_COMICS, MOCK_GENRES } from '../mock-data';
 import { createServerSupabaseClient } from '../supabase/server';
 import { createClient } from '../supabase/client';
+import { getTursoClient } from '../turso';
+import {
+  getTursoGenres,
+  getTursoGenresWithCounts,
+  getTursoLatestComics,
+  getTursoPopularComics,
+  getTursoComicBySlug,
+  getTursoComics,
+} from './turso-comics';
 
 function getSupabaseClient() {
   if (typeof window !== 'undefined') {
@@ -10,20 +19,49 @@ function getSupabaseClient() {
   return createServerSupabaseClient();
 }
 
+// In-memory cache for genre counts to avoid expensive DB scans on every request
+let cachedGenresWithCounts: (Genre & { count: number })[] | null = null;
+let lastGenresFetchedAt = 0;
+const GENRES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 export async function getGenres(): Promise<Genre[]> {
+  // 1. Try Turso first if configured
+  if (getTursoClient()) {
+    const tursoGenres = await getTursoGenres();
+    if (tursoGenres && tursoGenres.length > 0) return tursoGenres;
+  }
+
+  // 2. Fallback to Supabase
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
       const { data, error } = await supabase.from('genres').select('*').order('name');
       if (!error && data && data.length > 0) return data;
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error('[getGenres] Error fetching genres from Supabase:', err);
     }
   }
-  return MOCK_GENRES;
+
+  return !supabase && !getTursoClient() ? MOCK_GENRES : [];
 }
 
 export async function getGenresWithCounts(): Promise<(Genre & { count: number })[]> {
+  const now = Date.now();
+  if (cachedGenresWithCounts && now - lastGenresFetchedAt < GENRES_CACHE_TTL_MS) {
+    return cachedGenresWithCounts;
+  }
+
+  // 1. Try Turso first if configured (ultra-fast GROUP BY)
+  if (getTursoClient()) {
+    const tursoCounts = await getTursoGenresWithCounts();
+    if (tursoCounts && tursoCounts.length > 0) {
+      cachedGenresWithCounts = tursoCounts;
+      lastGenresFetchedAt = now;
+      return tursoCounts;
+    }
+  }
+
+  // 2. Fallback to Supabase
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -33,149 +71,277 @@ export async function getGenresWithCounts(): Promise<(Genre & { count: number })
         .order('name');
 
       if (!genresError && genresData && genresData.length > 0) {
-        const { data: comicGenres } = await supabase
+        const { data: comicGenres, error: cgError } = await supabase
           .from('comic_genres')
-          .select('genre_id, comics(id)');
+          .select('genre_id');
 
         const counts: Record<number, number> = {};
-        if (comicGenres) {
+        if (!cgError && comicGenres) {
           comicGenres.forEach((cg: any) => {
-            if (cg.comics) {
-              counts[cg.genre_id] = (counts[cg.genre_id] || 0) + 1;
-            }
+            counts[cg.genre_id] = (counts[cg.genre_id] || 0) + 1;
           });
         }
 
-        return genresData.map((g: any) => ({
+        const result = genresData.map((g: any) => ({
           id: g.id,
           name: g.name,
           slug: g.slug,
           count: counts[g.id] || 0,
         }));
+
+        cachedGenresWithCounts = result;
+        lastGenresFetchedAt = now;
+        return result;
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error('[getGenresWithCounts] Supabase Error:', err);
     }
   }
 
-  // Fallback calculation from MOCK_COMICS
-  const fallbackCounts: Record<number, number> = {};
-  MOCK_COMICS.forEach((c) => {
-    c.genres?.forEach((g) => {
-      fallbackCounts[g.id] = (fallbackCounts[g.id] || 0) + 1;
+  if (!supabase && !getTursoClient()) {
+    const fallbackCounts: Record<number, number> = {};
+    MOCK_COMICS.forEach((c) => {
+      c.genres?.forEach((g) => {
+        fallbackCounts[g.id] = (fallbackCounts[g.id] || 0) + 1;
+      });
     });
-  });
 
-  return MOCK_GENRES.map((g) => ({
-    ...g,
-    count: fallbackCounts[g.id] || 0,
-  }));
+    return MOCK_GENRES.map((g) => ({
+      ...g,
+      count: fallbackCounts[g.id] || 0,
+    }));
+  }
+
+  return [];
 }
 
-export async function getComics(filters?: FilterState): Promise<Comic[]> {
-  const supabase = getSupabaseClient();
-  
-  if (supabase) {
-    try {
-      let query = supabase.from('comics').select(`
-        *,
-        genres:comic_genres(genres(*)),
-        chapters(id, chapter_number, title, released_at)
-      `);
+/**
+ * Helper to batch-attach latest chapter to comics when using Supabase.
+ */
+async function attachLatestChapters(supabase: any, comics: any[]): Promise<Comic[]> {
+  if (!comics || comics.length === 0) return [];
+  const comicIds = comics.map((c) => c.id).filter(Boolean);
+  if (comicIds.length === 0) return comics;
 
-      if (filters?.type && filters.type !== 'all') {
-        query = query.eq('type', filters.type);
-      }
+  try {
+    const { data: chapters, error } = await supabase
+      .from('chapters')
+      .select('id, comic_id, chapter_number, released_at')
+      .in('comic_id', comicIds)
+      .order('chapter_number', { ascending: false });
 
-      if (filters?.status && filters.status !== 'all') {
-        query = query.eq('status', filters.status);
-      }
-
-      if (filters?.query) {
-        query = query.ilike('title', `%${filters.query}%`);
-      }
-
-      const { data, error } = await query.order('updated_at', { ascending: false });
-
-      if (!error && data) {
-        return data.map((item: any) => {
-          const sortedChapters = item.chapters?.sort(
-            (a: any, b: any) => (b.chapter_number ?? 0) - (a.chapter_number ?? 0)
-          );
-          return {
-            ...item,
-            genres: item.genres?.map((g: any) => g.genres).filter(Boolean),
-            latest_chapter: sortedChapters?.[0] || undefined,
+    const latestChapterMap: Record<string, any> = {};
+    if (!error && chapters) {
+      for (const ch of chapters) {
+        if (!latestChapterMap[ch.comic_id]) {
+          latestChapterMap[ch.comic_id] = {
+            id: ch.id,
+            chapter_number: Number(ch.chapter_number),
+            released_at: ch.released_at,
           };
-        });
+        }
       }
-    } catch {
-      // Fallback
     }
+
+    return comics.map((item) => ({
+      ...item,
+      genres: item.genres?.map((g: any) => g.genres).filter(Boolean) || [],
+      latest_chapter: latestChapterMap[item.id] || undefined,
+    }));
+  } catch (err) {
+    console.error('[attachLatestChapters] Error:', err);
+    return comics.map((item) => ({
+      ...item,
+      genres: item.genres?.map((g: any) => g.genres).filter(Boolean) || [],
+    }));
+  }
+}
+
+/**
+ * Fast targeted query for latest updated comics (e.g. 18 for Homepage).
+ */
+export async function getLatestComics(limit = 18): Promise<Comic[]> {
+  // 1. Try Turso
+  if (getTursoClient()) {
+    const comics = await getTursoLatestComics(limit);
+    if (comics && comics.length > 0) return comics;
   }
 
-  // Fallback to MOCK_COMICS with in-memory filtering
-  let result = [...MOCK_COMICS];
+  // 2. Fallback to Supabase
+  const supabase = getSupabaseClient();
+  if (!supabase) return MOCK_COMICS.slice(0, limit);
 
-  if (filters?.type && filters.type !== 'all') {
-    result = result.filter((c) => c.type === filters.type);
+  try {
+    const { data, error } = await supabase
+      .from('comics')
+      .select(`
+        id, title, slug, type, status, cover_url, rating, synopsis, author, updated_at,
+        genres:comic_genres(genres(id, name, slug))
+      `)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[getLatestComics] Supabase error:', error);
+      return [];
+    }
+
+    return await attachLatestChapters(supabase, data || []);
+  } catch (err) {
+    console.error('[getLatestComics] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * Fast targeted query for highest rated / popular comics (e.g. 10 for Homepage Carousel).
+ */
+export async function getPopularComics(limit = 10): Promise<Comic[]> {
+  // 1. Try Turso
+  if (getTursoClient()) {
+    const comics = await getTursoPopularComics(limit);
+    if (comics && comics.length > 0) return comics;
   }
 
-  if (filters?.status && filters.status !== 'all') {
-    result = result.filter((c) => c.status === filters.status);
+  // 2. Fallback to Supabase
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return [...MOCK_COMICS].sort((a, b) => b.rating - a.rating).slice(0, limit);
   }
 
-  if (filters?.genres && filters.genres.length > 0) {
-    result = result.filter((c) =>
-      filters.genres.every((genreId) => c.genres?.some((g) => g.id === genreId))
-    );
+  try {
+    const { data, error } = await supabase
+      .from('comics')
+      .select(`
+        id, title, slug, type, status, cover_url, rating, synopsis, author, updated_at,
+        genres:comic_genres(genres(id, name, slug))
+      `)
+      .order('rating', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[getPopularComics] Database error:', error);
+      return [];
+    }
+
+    return await attachLatestChapters(supabase, data || []);
+  } catch (err) {
+    console.error('[getPopularComics] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * Fast targeted query for the Featured Editor Pick comic on Homepage.
+ */
+export async function getFeaturedComic(): Promise<Comic | null> {
+  const popular = await getPopularComics(1);
+  return popular[0] || null;
+}
+
+/**
+ * General bounded comics query with filtering and pagination.
+ */
+export async function getComics(
+  filters?: FilterState,
+  options?: { page?: number; limit?: number }
+): Promise<Comic[]> {
+  // 1. Try Turso
+  if (getTursoClient()) {
+    const comics = await getTursoComics(filters, options);
+    if (comics && comics.length > 0) return comics;
   }
 
-  if (filters?.query) {
-    const q = filters.query.toLowerCase();
-    result = result.filter(
-      (c) =>
-        c.title.toLowerCase().includes(q) ||
-        c.alt_titles.some((alt) => alt.toLowerCase().includes(q))
-    );
+  // 2. Fallback to Supabase
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    let result = [...MOCK_COMICS];
+    if (filters?.type && filters.type !== 'all') {
+      result = result.filter((c) => c.type === filters.type);
+    }
+    if (filters?.status && filters.status !== 'all') {
+      result = result.filter((c) => c.status === filters.status);
+    }
+    return result.slice(0, options?.limit || 24);
   }
 
-  if (filters?.sort === 'popular') {
-    result.sort((a, b) => b.rating - a.rating);
-  } else if (filters?.sort === 'rating') {
-    result.sort((a, b) => b.rating - a.rating);
-  } else if (filters?.sort === 'title') {
-    result.sort((a, b) => a.title.localeCompare(b.title));
-  } else {
-    result.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  }
+  const limit = Math.min(100, Math.max(1, options?.limit || 24));
+  const page = Math.max(1, options?.page || 1);
+  const offset = (page - 1) * limit;
 
-  return result;
+  try {
+    let query = supabase.from('comics').select(`
+      id, title, slug, type, status, cover_url, rating, synopsis, author, updated_at,
+      genres:comic_genres(genres(id, name, slug))
+    `);
+
+    if (filters?.type && filters.type !== 'all') {
+      query = query.eq('type', filters.type);
+    }
+
+    if (filters?.status && filters.status !== 'all') {
+      query = query.eq('status', filters.status);
+    }
+
+    if (filters?.query) {
+      query = query.ilike('title', `%${filters.query}%`);
+    }
+
+    if (filters?.sort === 'popular' || filters?.sort === 'rating') {
+      query = query.order('rating', { ascending: false });
+    } else if (filters?.sort === 'title') {
+      query = query.order('title', { ascending: true });
+    } else {
+      query = query.order('updated_at', { ascending: false });
+    }
+
+    query = query.range(offset, offset + limit - 1);
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('[getComics] Query error:', error);
+      return [];
+    }
+
+    return await attachLatestChapters(supabase, data || []);
+  } catch (err) {
+    console.error('[getComics] Exception:', err);
+    return [];
+  }
 }
 
 export async function getComicBySlug(slug: string): Promise<Comic | null> {
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('comics')
-        .select(`
-          *,
-          genres:comic_genres(genres(*))
-        `)
-        .eq('slug', slug)
-        .single();
-
-      if (!error && data) {
-        return {
-          ...data,
-          genres: data.genres?.map((g: any) => g.genres).filter(Boolean),
-        };
-      }
-    } catch {
-      // Fallback
-    }
+  // 1. Try Turso
+  if (getTursoClient()) {
+    const comic = await getTursoComicBySlug(slug);
+    if (comic) return comic;
   }
 
-  return MOCK_COMICS.find((c) => c.slug === slug) || null;
+  // 2. Fallback to Supabase
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return MOCK_COMICS.find((c) => c.slug === slug) || null;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('comics')
+      .select(`
+        id, title, slug, type, status, cover_url, rating, synopsis, author, updated_at,
+        genres:comic_genres(genres(id, name, slug))
+      `)
+      .eq('slug', slug)
+      .maybeSingle();
+
+    if (error || !data) {
+      return null;
+    }
+
+    const comicsWithChapter = await attachLatestChapters(supabase, [data]);
+    return comicsWithChapter[0] || null;
+  } catch (err) {
+    console.error('[getComicBySlug] Exception:', err);
+    return null;
+  }
 }

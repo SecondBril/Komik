@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getTursoClient } from '@/lib/turso';
+import { getTursoBrowseComics } from '@/lib/queries/turso-comics';
 
 // GET /api/browse?type=all&status=all&q=keyword&genres=action,romance&sort=latest&page=1&limit=30
 export async function GET(req: NextRequest) {
@@ -12,6 +14,31 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)));
   const offset = (page - 1) * limit;
+
+  // 1. Try Turso first (ultra-fast, no Supabase quota usage)
+  if (getTursoClient()) {
+    try {
+      const result = await getTursoBrowseComics({
+        type,
+        status,
+        q,
+        genres,
+        sort,
+        page,
+        limit,
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: result.data,
+        total: result.total,
+        page,
+        limit,
+      });
+    } catch (tursoErr) {
+      console.warn('[Browse API] Turso query failed, falling back to Supabase:', tursoErr);
+    }
+  }
 
   const supabase = createAdminClient();
   if (!supabase) {
@@ -88,8 +115,7 @@ export async function GET(req: NextRequest) {
       .select(`
         id, title, slug, type, status, cover_url, rating, author,
         synopsis, updated_at, created_at,
-        genres:comic_genres(genres(id, name, slug)),
-        chapters:chapters(id, chapter_number, title, released_at)
+        genres:comic_genres(genres(id, name, slug))
       `, { count: 'exact' });
 
     if (matchingComicIds !== null) {
@@ -116,17 +142,39 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    const comics = (data || []).map((item: any) => {
-      const sortedChapters = item.chapters?.sort(
-        (a: any, b: any) => (b.chapter_number ?? 0) - (a.chapter_number ?? 0)
-      );
-      return {
-        ...item,
-        genres: item.genres?.map((g: any) => g.genres).filter(Boolean) || [],
-        latest_chapter: sortedChapters?.[0] || null,
-        chapters: undefined,
-      };
-    });
+    // Batch-fetch latest chapter only for the comics on this page (<50 IDs)
+    const comicIds = (data || []).map((c: any) => c.id);
+    const latestChapterMap: Record<string, any> = {};
+
+    if (comicIds.length > 0) {
+      try {
+        const { data: chapters } = await supabase
+          .from('chapters')
+          .select('id, comic_id, chapter_number, released_at')
+          .in('comic_id', comicIds)
+          .order('chapter_number', { ascending: false });
+
+        if (chapters) {
+          for (const ch of chapters) {
+            if (!latestChapterMap[ch.comic_id]) {
+              latestChapterMap[ch.comic_id] = {
+                id: ch.id,
+                chapter_number: Number(ch.chapter_number),
+                released_at: ch.released_at,
+              };
+            }
+          }
+        }
+      } catch (chErr) {
+        console.error('Failed to fetch latest chapters in browse:', chErr);
+      }
+    }
+
+    const comics = (data || []).map((item: any) => ({
+      ...item,
+      genres: item.genres?.map((g: any) => g.genres).filter(Boolean) || [],
+      latest_chapter: latestChapterMap[item.id] || null,
+    }));
 
     // Final safety check: ensure every comic has ALL requested genres
     let filteredComics = comics;

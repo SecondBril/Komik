@@ -1,26 +1,23 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { getComics, getGenresWithCounts } from '@/lib/queries/comics';
+import { getLatestComics, getPopularComics, getGenresWithCounts } from '@/lib/queries/comics';
 import { ComicCard } from '@/components/comic/ComicCard';
 import { ChameleonMascot } from '@/components/ui/ChameleonMascot';
 import { DecorativeBlobs } from '@/components/ui/DecorativeBlobs';
 import { Sparkles, Flame, Clock, ChevronRight, Compass, ArrowRight, Star } from 'lucide-react';
 
-export const dynamic = 'force-dynamic';
+// Incremental Static Regeneration (ISR): Cache rendered page for 60 seconds
+export const revalidate = 60;
 
 export default async function HomePage() {
-  const [comics, allGenresWithCounts] = await Promise.all([
-    getComics(),
+  const [latestComics, popularComics, allGenresWithCounts] = await Promise.all([
+    getLatestComics(18),
+    getPopularComics(10),
     getGenresWithCounts(),
   ]);
 
-  const latestComics = [...comics].sort(
-    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-  );
-
-  const popularComics = [...comics].sort((a, b) => b.rating - a.rating);
-  const featuredComic = popularComics[0] || comics[0];
+  const featuredComic = popularComics[0] || latestComics[0];
 
   // Sort genres by actual comic count from database descending, take top 6
   const categoriesWithCounts = [...allGenresWithCounts]

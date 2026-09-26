@@ -2,7 +2,7 @@ name: Auto-Sync Comic Catalog & Chapters
 
 on:
   schedule:
-    - cron: "0 */2 * * *" # Berjalan otomatis setiap 2 jam (Quick Sync + Quick Repair)
+     - cron: "0 17 * * *" # Berjalan 1x sehari (pukul 00:00 WIB)
   workflow_dispatch:
     inputs:
       mode:
@@ -36,7 +36,7 @@ jobs:
     name: Quick Sync (Pages 1-5)
     if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'quick') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 360
 
     steps:
       - name: Checkout Repository
@@ -75,7 +75,7 @@ jobs:
     name: Sync Shard ${{ matrix.shard.id }}/20 (P${{ matrix.shard.start }}-${{ matrix.shard.end }})
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'full_sync' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
 
     strategy:
       fail-fast: false
@@ -140,7 +140,7 @@ jobs:
     name: Repair Shard ${{ matrix.shard.id }}/20
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'repair_all' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
 
     strategy:
       fail-fast: false
@@ -204,7 +204,7 @@ jobs:
     name: Quick / Single Comic Image Repair
     if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'quick' || inputs.mode == 'repair_single')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 360
 
     steps:
       - name: Checkout Repository

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createClient as createTursoClient } from '@libsql/client';
 import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 import { execSync } from 'child_process';
@@ -29,6 +30,19 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Turso client
+let turso = null;
+const tursoUrl = process.env.TURSO_DATABASE_URL;
+const tursoToken = process.env.TURSO_AUTH_TOKEN;
+if (tursoUrl && tursoToken) {
+  try {
+    turso = createTursoClient({ url: tursoUrl, authToken: tursoToken });
+    console.log('✅ Turso Database terhubung untuk perbaikan chapter/halaman!');
+  } catch (tErr) {
+    console.warn('⚠️ Gagal inisialisasi Turso:', tErr.message);
+  }
+}
 
 function getChromeExecutablePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
@@ -332,6 +346,27 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
     }
 
     if (capturedForChapter.length > 0) {
+      if (turso) {
+        try {
+          const tStmts = capturedForChapter.map((imgUrl, idx) => ({
+            sql: `
+              INSERT INTO chapter_pages (id, chapter_id, page_number, image_url)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(chapter_id, page_number) DO UPDATE SET image_url = excluded.image_url;
+            `,
+            args: [`${ch.id}_p${idx + 1}`, ch.id, idx + 1, imgUrl],
+          }));
+          tStmts.push({
+            sql: `UPDATE chapters SET pages = ?, status = 'published' WHERE id = ?;`,
+            args: [JSON.stringify(capturedForChapter), ch.id],
+          });
+          await turso.batch(tStmts, 'write');
+          console.log(`      ✅ Sukses! ${capturedForChapter.length} halaman tersimpan di Turso.`);
+        } catch (tErr) {
+          console.warn(`      ⚠️ Gagal simpan ke Turso:`, tErr.message);
+        }
+      }
+
       const rows = capturedForChapter.map((imgUrl, idx) => ({
         chapter_id: ch.id,
         page_number: idx + 1,
@@ -343,9 +378,8 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
         .upsert(rows, { onConflict: 'chapter_id,page_number' });
 
       if (insErr) {
-        console.error(`      ❌ Gagal simpan ke DB untuk Ch ${ch.chapter_number}:`, insErr.message);
+        console.warn(`      ⚠️ Gagal simpan ke Supabase untuk Ch ${ch.chapter_number}:`, insErr.message);
       } else {
-        console.log(`      ✅ Sukses! ${rows.length} halaman tersimpan di database.`);
         await supabase.from('chapters').update({ status: 'published', retry_count: 0 }).eq('id', ch.id);
         restoredChaptersCount++;
       }

@@ -118,45 +118,14 @@ function BrowseContent() {
         setComics(data.data);
         setTotal(data.total ?? data.data.length);
       } else {
-        // Fallback filter on mock
-        let filtered = [...MOCK_COMICS];
-        if (activeType !== 'all') filtered = filtered.filter((c) => c.type === activeType);
-        if (activeStatus !== 'all') filtered = filtered.filter((c) => c.status === activeStatus);
-        if (selectedGenres.length > 0) {
-          filtered = filtered.filter((c) =>
-            selectedGenres.every((slug) =>
-              c.genres?.some(
-                (g) =>
-                  g.slug === slug ||
-                  String(g.id) === slug ||
-                  g.name?.toLowerCase() === slug.toLowerCase()
-              )
-            )
-          );
-        }
-        if (searchQuery.trim()) {
-          const q = searchQuery.trim().toLowerCase();
-          filtered = filtered.filter(
-            (c) =>
-              c.title.toLowerCase().includes(q) ||
-              c.alt_titles?.some((a) => a.toLowerCase().includes(q))
-          );
-        }
-        if (activeSort === 'popular') {
-          filtered.sort((a, b) => b.rating - a.rating);
-        } else if (activeSort === 'title') {
-          filtered.sort((a, b) => a.title.localeCompare(b.title));
-        } else {
-          filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-        }
-        const totalCount = filtered.length;
-        const paginated = filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
-        setComics(paginated);
-        setTotal(totalCount);
+        console.error('[Browse] Error fetching comics:', data.error);
+        setComics([]);
+        setTotal(0);
       }
-    } catch {
-      setComics(MOCK_COMICS.slice(0, perPage));
-      setTotal(MOCK_COMICS.length);
+    } catch (err) {
+      console.error('[Browse] Exception fetching comics:', err);
+      setComics([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getTursoClient } from '@/lib/turso';
 import { fetchFullComicRelations } from '@/lib/adaptation-service';
 import { MOCK_COMICS } from '@/lib/mock-data';
 
@@ -15,11 +16,27 @@ export async function GET(
     return NextResponse.json({ success: false, error: 'Slug is required' }, { status: 400 });
   }
 
+  const turso = getTursoClient();
   const supabase = createAdminClient();
   let comicTitle = '';
   let comicId: string | null = null;
 
-  if (supabase) {
+  if (turso) {
+    try {
+      const res = await turso.execute({
+        sql: `SELECT id, title, slug FROM comics WHERE slug = ? LIMIT 1;`,
+        args: [slug],
+      });
+      if (res.rows.length > 0) {
+        comicTitle = String(res.rows[0].title);
+        comicId = String(res.rows[0].id);
+      }
+    } catch (tErr) {
+      console.warn('[Relations API] Turso lookup warning:', tErr);
+    }
+  }
+
+  if (!comicTitle && supabase) {
     try {
       const { data: comic } = await supabase
         .from('comics')

@@ -18,6 +18,7 @@
     "repair-chapters": "node scripts/repair-all-incomplete-chapters.mjs"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.1",
     "cheerio": "^1.2.0",

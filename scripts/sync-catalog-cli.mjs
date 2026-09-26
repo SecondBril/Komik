@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createClient as createTursoClient } from '@libsql/client';
 import * as cheerio from 'cheerio';
 import puppeteer from 'puppeteer-core';
 import fs from 'fs';
@@ -32,6 +33,19 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Load Turso client (LibSQL / Edge SQLite)
+let turso = null;
+const tursoUrl = process.env.TURSO_DATABASE_URL;
+const tursoToken = process.env.TURSO_AUTH_TOKEN;
+if (tursoUrl && tursoToken) {
+  try {
+    turso = createTursoClient({ url: tursoUrl, authToken: tursoToken });
+    console.log('✅ Turso Database terhubung untuk sinkronisasi otomatis!');
+  } catch (tErr) {
+    console.warn('⚠️ Gagal inisialisasi Turso di scraper:', tErr.message);
+  }
+}
 
 function getChromeExecutablePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
@@ -218,17 +232,45 @@ async function fetchChapterPages(browser, comicSlug, chapterNumber) {
 
 async function saveChapterPagesToDb(supabase, chapterId, images) {
   if (!images || images.length === 0) return 0;
-  const pageRows = images.map((url, idx) => ({
-    chapter_id: chapterId,
-    page_number: idx + 1,
-    image_url: url,
-  }));
-  const { error } = await supabase.from('chapter_pages').upsert(pageRows, { onConflict: 'chapter_id,page_number' });
-  if (error) {
-    console.warn(`       ⚠️ Gagal menyimpan chapter_pages:`, error.message);
-    return 0;
+
+  // 1. Simpan ke Turso (prioritas utama, 0 kuota Supabase terbakar)
+  if (turso) {
+    try {
+      const stmts = images.map((url, idx) => ({
+        sql: `
+          INSERT INTO chapter_pages (id, chapter_id, page_number, image_url)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(chapter_id, page_number) DO UPDATE SET image_url = excluded.image_url;
+        `,
+        args: [`${chapterId}_p${idx + 1}`, chapterId, idx + 1, url],
+      }));
+      stmts.push({
+        sql: `UPDATE chapters SET pages = ? WHERE id = ?;`,
+        args: [JSON.stringify(images), chapterId],
+      });
+      await turso.batch(stmts, 'write');
+    } catch (tErr) {
+      console.warn(`       ⚠️ Gagal menyimpan ke Turso:`, tErr.message);
+    }
   }
-  return pageRows.length;
+
+  // 2. Simpan ke Supabase jika tersedia
+  if (supabase) {
+    try {
+      const pageRows = images.map((url, idx) => ({
+        chapter_id: chapterId,
+        page_number: idx + 1,
+        image_url: url,
+      }));
+      const { error } = await supabase.from('chapter_pages').upsert(pageRows, { onConflict: 'chapter_id,page_number' });
+      if (error) {
+        console.warn(`       ⚠️ Gagal menyimpan chapter_pages ke Supabase:`, error.message);
+      }
+    } catch (err) {
+      console.warn(`       ⚠️ Supabase error:`, err.message);
+    }
+  }
+  return images.length;
 }
 
 async function runCliSync() {
@@ -428,6 +470,35 @@ async function runCliSync() {
             newComics++;
             comicId = newComic.id;
 
+            // Sync ke Turso
+            if (turso) {
+              try {
+                await turso.execute({
+                  sql: `
+                    INSERT OR REPLACE INTO comics (
+                      id, slug, title, alt_titles, type, synopsis, cover_url, author, rating, status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                  `,
+                  args: [
+                    comicId,
+                    finalSlug,
+                    finalTitle,
+                    JSON.stringify(finalAltTitles),
+                    finalType,
+                    finalSynopsis,
+                    finalCover,
+                    finalAuthor,
+                    finalRating,
+                    finalStatus,
+                    new Date().toISOString(),
+                    new Date().toISOString(),
+                  ],
+                });
+              } catch (tErr) {
+                console.warn('       ⚠️ Turso insert comic warning:', tErr.message);
+              }
+            }
+
             // Sync genre jika ditemukan dari metadata API
             if (meta?.genres && meta.genres.length > 0) {
               await syncWorkerComicGenres(supabase, comicId, meta.genres);
@@ -456,6 +527,37 @@ async function runCliSync() {
                   .select('id, chapter_number');
                 if (bData) insertedChs = insertedChs.concat(bData);
               }
+
+              // Batch insert chapters ke Turso
+              if (turso && rows.length > 0) {
+                try {
+                  const chStmts = rows.map((ch) => ({
+                    sql: `
+                      INSERT OR REPLACE INTO chapters (
+                        id, comic_id, chapter_number, title, status, released_at, created_at
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                    `,
+                    args: [
+                      `${comicId}_ch${ch.chapter_number}`,
+                      comicId,
+                      ch.chapter_number,
+                      ch.title,
+                      ch.status,
+                      ch.released_at,
+                      new Date().toISOString(),
+                    ],
+                  }));
+                  await turso.batch(chStmts, 'write');
+                  const maxCh = Math.max(...rows.map((r) => r.chapter_number));
+                  await turso.execute({
+                    sql: `UPDATE comics SET latest_chapter_number = ?, latest_chapter_date = ?, updated_at = ? WHERE id = ?;`,
+                    args: [maxCh, new Date().toISOString(), new Date().toISOString(), comicId],
+                  });
+                } catch (tErr) {
+                  console.warn('       ⚠️ Turso insert chapters warning:', tErr.message);
+                }
+              }
+
               newChapters += chapters.length;
               console.log(`     ✓ Mendaftarkan ${chapters.length} chapter (semua chapter tampil di web).`);
 
@@ -477,6 +579,31 @@ async function runCliSync() {
                 status: 'published',
                 released_at: new Date().toISOString(),
               }).select('id, chapter_number').single();
+
+              if (turso) {
+                try {
+                  const chId = newCh?.id || `${comicId}_ch${item.latestChapter.chapterNumber}`;
+                  await turso.execute({
+                    sql: `INSERT OR REPLACE INTO chapters (id, comic_id, chapter_number, title, status, released_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                    args: [
+                      chId,
+                      comicId,
+                      item.latestChapter.chapterNumber,
+                      item.latestChapter.title || `Chapter ${item.latestChapter.chapterNumber}`,
+                      'published',
+                      new Date().toISOString(),
+                      new Date().toISOString(),
+                    ],
+                  });
+                  await turso.execute({
+                    sql: `UPDATE comics SET latest_chapter_number = ?, latest_chapter_date = ?, updated_at = ? WHERE id = ?;`,
+                    args: [item.latestChapter.chapterNumber, new Date().toISOString(), new Date().toISOString(), comicId],
+                  });
+                } catch (tErr) {
+                  console.warn('       ⚠️ Turso single chapter warning:', tErr.message);
+                }
+              }
+
               newChapters++;
               console.log(`     ✓ Chapter terbaru didaftarkan: Chapter ${item.latestChapter.chapterNumber}`);
 
@@ -521,6 +648,24 @@ async function runCliSync() {
                   updatePayload.cover_url = meta.cover_url;
                 }
                 await supabase.from('comics').update(updatePayload).eq('id', fullComic.id);
+                if (turso) {
+                  try {
+                    await turso.execute({
+                      sql: `UPDATE comics SET type = ?, status = ?, rating = ?, alt_titles = ?, updated_at = ?, synopsis = COALESCE(?, synopsis), author = COALESCE(?, author), cover_url = COALESCE(?, cover_url) WHERE id = ?;`,
+                      args: [
+                        updatePayload.type,
+                        updatePayload.status,
+                        updatePayload.rating,
+                        JSON.stringify(updatePayload.alt_titles || []),
+                        updatePayload.updated_at,
+                        updatePayload.synopsis || null,
+                        updatePayload.author || null,
+                        updatePayload.cover_url || null,
+                        fullComic.id,
+                      ],
+                    });
+                  } catch (tErr) {}
+                }
                 if (meta.genres?.length) {
                   await syncWorkerComicGenres(supabase, fullComic.id, meta.genres);
                 }
@@ -552,6 +697,13 @@ async function runCliSync() {
                   const ghostChs = dbChs.filter((c) => !validNums.has(c.chapter_number));
                   if (ghostChs.length > 0) {
                     const ghostIds = ghostChs.map((c) => c.id);
+                    if (turso) {
+                      try {
+                        const ph = ghostIds.map(() => '?').join(',');
+                        await turso.execute({ sql: `DELETE FROM chapter_pages WHERE chapter_id IN (${ph});`, args: ghostIds });
+                        await turso.execute({ sql: `DELETE FROM chapters WHERE id IN (${ph});`, args: ghostIds });
+                      } catch (tErr) {}
+                    }
                     await supabase.from('chapter_pages').delete().in('chapter_id', ghostIds);
                     await supabase.from('chapters').delete().in('id', ghostIds);
                     console.log(`     ✓ Dihapus ${ghostIds.length} chapter fiktif untuk "${existing.title}".`);
@@ -569,6 +721,22 @@ async function runCliSync() {
                   const batch = rows.slice(i, i + 100);
                   await supabase.from('chapters').upsert(batch, { onConflict: 'comic_id,chapter_number' });
                 }
+
+                if (turso && rows.length > 0) {
+                  try {
+                    const chStmts = rows.map((ch) => ({
+                      sql: `INSERT OR REPLACE INTO chapters (id, comic_id, chapter_number, title, status, released_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                      args: [`${existing.id}_ch${ch.chapter_number}`, existing.id, ch.chapter_number, ch.title, ch.status, ch.released_at, new Date().toISOString()],
+                    }));
+                    await turso.batch(chStmts, 'write');
+                    const maxCh = Math.max(...rows.map((r) => r.chapter_number));
+                    await turso.execute({
+                      sql: `UPDATE comics SET latest_chapter_number = ?, latest_chapter_date = ?, updated_at = ? WHERE id = ?;`,
+                      args: [maxCh, new Date().toISOString(), new Date().toISOString(), existing.id],
+                    });
+                  } catch (tErr) {}
+                }
+
                 newChapters += Math.max(0, chapters.length - (count || 0));
                 console.log(`   + Memperbarui daftar chapter "${existing.title}": ${chapters.length} chapter sekarang lengkap.`);
               }
@@ -594,6 +762,21 @@ async function runCliSync() {
                 status: 'published',
                 released_at: new Date().toISOString(),
               }).select('id').single();
+
+              if (turso) {
+                try {
+                  const tursoChId = newCh?.id || `${existing.id}_ch${chNum}`;
+                  await turso.execute({
+                    sql: `INSERT OR REPLACE INTO chapters (id, comic_id, chapter_number, title, status, released_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                    args: [tursoChId, existing.id, chNum, item.latestChapter.title || `Chapter ${chNum}`, 'published', new Date().toISOString(), new Date().toISOString()],
+                  });
+                  await turso.execute({
+                    sql: `UPDATE comics SET latest_chapter_number = ?, latest_chapter_date = ?, updated_at = ? WHERE id = ?;`,
+                    args: [chNum, new Date().toISOString(), new Date().toISOString(), existing.id],
+                  });
+                } catch (tErr) {}
+              }
+
               newChapters++;
               await supabase.from('comics').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
 

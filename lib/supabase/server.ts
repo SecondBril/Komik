@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
+import { createClient as createSupabaseJsClient } from '@supabase/supabase-js';
 
 export function createServerSupabaseClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -34,6 +35,13 @@ export function createServerSupabaseClient() {
       },
     });
   } catch {
-    return null;
+    // If cookies() is unavailable (e.g., during static pre-rendering, ISR, or outside request scope),
+    // fallback to a stateless Supabase client so public data can always be read from the real database!
+    return createSupabaseJsClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
   }
 }

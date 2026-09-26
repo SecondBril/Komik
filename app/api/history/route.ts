@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getTursoClient } from '@/lib/turso';
+import {
+  getTursoReadingHistory,
+  upsertTursoReadingHistory,
+  deleteTursoReadingHistory,
+} from '@/lib/queries/turso-comics';
 
-// GET /api/history — Ambil semua riwayat baca user dari Supabase (per chapter, data real)
+// GET /api/history — Ambil semua riwayat baca user (Turso dengan fallback Supabase)
 export async function GET() {
   const supabase = createServerSupabaseClient();
   if (!supabase) {
-    return NextResponse.json({ success: false, error: 'Supabase not configured' }, { status: 503 });
+    return NextResponse.json({ success: false, error: 'Auth not configured' }, { status: 503 });
   }
 
   const {
@@ -13,6 +19,18 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // 1. Prioritaskan Turso (super cepat ~10ms)
+  if (getTursoClient()) {
+    try {
+      const tursoHistory = await getTursoReadingHistory(user.id);
+      if (tursoHistory && tursoHistory.length > 0) {
+        return NextResponse.json({ success: true, data: tursoHistory });
+      }
+    } catch (err) {
+      console.warn('[History API GET] Turso query failed, falling back:', err);
+    }
   }
 
   const { data, error } = await supabase
@@ -145,14 +163,26 @@ export async function POST(req: NextRequest) {
   }
   const dedupedRows = Array.from(dedupedMap.values());
 
-  const { data, error } = await supabase
+  // 1. Sync ke Turso
+  if (getTursoClient()) {
+    try {
+      await upsertTursoReadingHistory(user.id, dedupedRows);
+    } catch (tursoErr) {
+      console.warn('[API History POST] Turso upsert warning:', tursoErr);
+    }
+  }
+
+  // 2. Sync ke Supabase
+  let data: any = null;
+  const { data: supaData, error } = await supabase
     .from('reading_history')
     .upsert(dedupedRows, { onConflict: 'user_id,chapter_id' })
     .select();
 
   if (error) {
-    console.error('[API History POST] Upsert error:', error.message);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.warn('[API History POST] Supabase upsert error:', error.message);
+  } else {
+    data = supaData;
   }
 
   return NextResponse.json({ success: true, count: dedupedRows.length, data });
@@ -180,6 +210,19 @@ export async function DELETE(req: NextRequest) {
   const chapterId = searchParams.get('chapterId');
   const comicId = searchParams.get('comicId');
 
+  // 1. Hapus dari Turso
+  if (getTursoClient()) {
+    try {
+      await deleteTursoReadingHistory(user.id, {
+        chapterId: chapterId || undefined,
+        comicId: comicId || undefined,
+      });
+    } catch (tursoErr) {
+      console.warn('[API History DELETE] Turso error:', tursoErr);
+    }
+  }
+
+  // 2. Hapus dari Supabase
   let query = supabase.from('reading_history').delete().eq('user_id', user.id);
 
   if (chapterId) {
@@ -191,7 +234,7 @@ export async function DELETE(req: NextRequest) {
 
   const { error } = await query;
   if (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.warn('[API History DELETE] Supabase error:', error.message);
   }
 
   return NextResponse.json({ success: true });

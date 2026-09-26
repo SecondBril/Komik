@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getTursoClient } from '@/lib/turso';
+import { getTursoChapterPages, saveTursoChapterPages } from '@/lib/queries/turso-comics';
 import { checkDailyRateLimit } from '@/lib/rate-limiter';
 import { scrapeLiveChapterPages } from '@/lib/scraper/live-chapter-scraper';
 import { MOCK_COMICS, MOCK_CHAPTERS } from '@/lib/mock-data';
@@ -43,15 +45,74 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const turso = getTursoClient();
   const supabase = createAdminClient();
   let comic: any = null;
   let currentChapter: any = null;
   let allChapters: any[] = [];
   let adaptation: any = null;
 
-  if (supabase) {
+  // 2. Prioritaskan query ke Turso (5-15ms, hemat kuota Supabase)
+  if (turso) {
     try {
-      // 2. Ambil metadata komik dari database Postgres
+      const comicRes = await turso.execute({
+        sql: `SELECT id, title, slug, type, author, cover_url, synopsis, rating, status FROM comics WHERE slug = ? LIMIT 1;`,
+        args: [slug],
+      });
+
+      if (comicRes.rows.length > 0) {
+        comic = {
+          id: String(comicRes.rows[0].id),
+          title: String(comicRes.rows[0].title),
+          slug: String(comicRes.rows[0].slug),
+          type: String(comicRes.rows[0].type || 'manhwa'),
+          author: String(comicRes.rows[0].author || 'Unknown'),
+          cover_url: String(comicRes.rows[0].cover_url || ''),
+          synopsis: String(comicRes.rows[0].synopsis || ''),
+          rating: Number(comicRes.rows[0].rating || 4.5),
+          status: String(comicRes.rows[0].status || 'ongoing'),
+        };
+
+        const [currChRes, allChRes] = await Promise.all([
+          turso.execute({
+            sql: `SELECT id, chapter_number, title, released_at, status FROM chapters WHERE comic_id = ? AND chapter_number = ? LIMIT 1;`,
+            args: [comic.id, chapterNumber],
+          }),
+          turso.execute({
+            sql: `SELECT id, chapter_number, title, released_at, status FROM chapters WHERE comic_id = ? ORDER BY chapter_number ASC;`,
+            args: [comic.id],
+          }),
+        ]);
+
+        if (currChRes.rows.length > 0) {
+          const r = currChRes.rows[0];
+          currentChapter = {
+            id: String(r.id),
+            comic_id: comic.id,
+            chapter_number: Number(r.chapter_number),
+            title: String(r.title || `Chapter ${r.chapter_number}`),
+            released_at: String(r.released_at),
+            status: String(r.status || 'published'),
+          };
+        }
+
+        allChapters = allChRes.rows.map((r: any) => ({
+          id: String(r.id),
+          comic_id: comic.id,
+          chapter_number: Number(r.chapter_number),
+          title: String(r.title || `Chapter ${r.chapter_number}`),
+          released_at: String(r.released_at),
+          status: String(r.status || 'published'),
+        }));
+      }
+    } catch (err: any) {
+      console.warn('[Reader API] Turso query error:', err?.message);
+    }
+  }
+
+  // 3. Fallback ke Supabase jika Turso belum memiliki data komik tersebut
+  if (!comic && supabase) {
+    try {
       const { data: comicData, error: comicErr } = await supabase
         .from('comics')
         .select('id, title, slug, type, author, cover_url, synopsis, rating, status')
@@ -61,7 +122,6 @@ export async function GET(req: NextRequest) {
       if (comicData && !comicErr) {
         comic = comicData;
 
-        // 3. Ambil daftar chapter dan informasi adaptasi
         const [chapterRes, allChaptersRes, adaptationRes] = await Promise.all([
           supabase
             .from('chapters')
@@ -119,9 +179,17 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // 4. Ambil gambar asli dari database Supabase (super cepat 10-30ms)
+  // 4. Ambil gambar asli (coba Turso dulu, lalu Supabase)
   let pages: any[] = [];
-  if (supabase && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
+  if (turso && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
+    try {
+      pages = await getTursoChapterPages(currentChapter.id);
+    } catch (err: any) {
+      console.warn('[Reader API] Error fetching pages from Turso:', err?.message);
+    }
+  }
+
+  if (pages.length === 0 && supabase && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
     try {
       const { data: dbPages, error: dbPagesErr } = await supabase
         .from('chapter_pages')
@@ -144,7 +212,17 @@ export async function GET(req: NextRequest) {
       if (livePages && livePages.length > 0) {
         pages = livePages;
 
-        // Auto-cache ke database Supabase (chapter_pages) agar pembaca berikutnya langsung membaca dari DB
+        // Auto-cache ke Turso (prioritas utama)
+        if (turso && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
+          try {
+            await saveTursoChapterPages(currentChapter.id, livePages);
+            console.log(`[Reader API] Auto-cached ${livePages.length} pages to Turso for chapter ${currentChapter.id}`);
+          } catch (tursoSaveErr: any) {
+            console.warn('[Reader API] Failed to auto-cache pages to Turso:', tursoSaveErr?.message);
+          }
+        }
+
+        // Auto-cache juga ke Supabase jika tersedia
         if (supabase && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
           try {
             const rowsToInsert = livePages.map((p, idx) => ({
@@ -153,9 +231,8 @@ export async function GET(req: NextRequest) {
               image_url: p.image_url,
             }));
             await supabase.from('chapter_pages').upsert(rowsToInsert, { onConflict: 'chapter_id,page_number' });
-            console.log(`[Reader API] Auto-cached ${rowsToInsert.length} pages to DB for chapter ${currentChapter.id}`);
           } catch (cacheErr: any) {
-            console.warn('[Reader API] Failed to auto-cache pages to DB:', cacheErr?.message);
+            console.warn('[Reader API] Failed to auto-cache pages to Supabase:', cacheErr?.message);
           }
         }
       }
