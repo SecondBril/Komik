@@ -7,8 +7,8 @@ import { ChameleonMascot } from '@/components/ui/ChameleonMascot';
 import { DecorativeBlobs } from '@/components/ui/DecorativeBlobs';
 import { Sparkles, Flame, Clock, ChevronRight, Compass, ArrowRight, Star } from 'lucide-react';
 
-// Incremental Static Regeneration (ISR): Cache rendered page for 60 seconds
-export const revalidate = 60;
+// Incremental Static Regeneration (ISR): Cache rendered page on Edge for 5 minutes (300 seconds)
+export const revalidate = 300;
 
 export default async function HomePage() {
   const [latestComics, popularComics, allGenresWithCounts] = await Promise.all([
@@ -81,6 +81,7 @@ export default async function HomePage() {
               alt={featuredComic.title}
               fill
               priority
+              sizes="(max-width: 640px) 100vw, (max-width: 1200px) 90vw, 1152px"
               className="object-cover group-hover:scale-105 transition-transform duration-300 opacity-90"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
@@ -160,9 +161,9 @@ export default async function HomePage() {
         </div>
 
         <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x scrollbar-thin">
-          {popularComics.map((comic) => (
+          {popularComics.map((comic, idx) => (
             <div key={comic.id} className="w-40 sm:w-48 shrink-0 snap-start">
-              <ComicCard comic={comic} />
+              <ComicCard comic={comic} priority={idx < 2} />
             </div>
           ))}
         </div>
@@ -189,7 +190,7 @@ export default async function HomePage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
           {latestComics.slice(0, 18).map((comic, index) => (
-            <ComicCard key={comic.id} comic={comic} priority={index < 6} />
+            <ComicCard key={comic.id} comic={comic} priority={index < 4} />
           ))}
         </div>
       </section>

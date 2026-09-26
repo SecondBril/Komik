@@ -13,7 +13,18 @@ interface ComicCardProps {
   priority?: boolean;
 }
 
+const getOptimizedCoverUrl = (url: string) => {
+  if (!url) return 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=400&auto=format&fit=crop&q=80';
+  if (url.includes('ik.imagekit.io') && !url.includes('tr=')) {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}tr=w-320,q-80,f-auto`;
+  }
+  return url;
+};
+
 export const ComicCard: React.FC<ComicCardProps> = ({ comic, priority = false }) => {
+  const coverSrc = getOptimizedCoverUrl(comic.cover_url);
+
   return (
     <Link
       href={`/komik/${comic.slug}`}
@@ -22,12 +33,14 @@ export const ComicCard: React.FC<ComicCardProps> = ({ comic, priority = false })
       {/* Cover Image Container (2:3 aspect ratio) */}
       <div className="relative w-full aspect-[2/3] overflow-hidden bg-[#FAF7F0] border-b-2 border-[#1A1A1A]">
         <Image
-          src={comic.cover_url}
+          src={coverSrc}
           alt={`${comic.title} Cover`}
           fill
           unoptimized
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
           priority={priority}
+          loading={priority ? undefined : 'lazy'}
+          decoding="async"
           onError={(e: any) => {
             e.currentTarget.src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
           }}

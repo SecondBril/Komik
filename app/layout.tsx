@@ -2,6 +2,21 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { SecretEightClickListener } from '@/components/mature/SecretEightClickListener';
 import { SpeedInsights } from '@vercel/speed-insights/next';
+import { Plus_Jakarta_Sans, Nunito } from 'next/font/google';
+
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
+  variable: '--font-plus-jakarta',
+});
+
+const nunito = Nunito({
+  subsets: ['latin'],
+  weight: ['400', '600', '700', '800', '900'],
+  display: 'swap',
+  variable: '--font-nunito',
+});
 
 export const metadata: Metadata = {
   title: 'KomikIndo — Baca Manga, Manhwa, Manhua Bahasa Indonesia Cepat & Tanpa Lag',
@@ -29,16 +44,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className="dark">
+    <html lang="id" className={`dark ${plusJakartaSans.variable} ${nunito.variable}`}>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
+        {/* Preconnect to external image CDNs for ultra-fast LCP */}
+        <link rel="preconnect" href="https://storage.westmanga.blog" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://ik.imagekit.io" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://storage.westmanga.blog" />
+        <link rel="dns-prefetch" href="https://ik.imagekit.io" />
       </head>
-      <body className="bg-[#0F1115] text-[#F2F3F5] antialiased selection:bg-[#7C5CFC]/30 selection:text-white min-h-screen flex flex-col">
+      <body className="bg-[#0F1115] text-[#F2F3F5] antialiased selection:bg-[#7C5CFC]/30 selection:text-white min-h-screen flex flex-col font-sans">
         <SecretEightClickListener />
         {children}
         <SpeedInsights />

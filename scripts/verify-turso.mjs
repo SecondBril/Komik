@@ -13,6 +13,8 @@ for (const line of envContent.split('\n')) {
 const client = createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN });
 
 async function verify() {
+  const indexes = await client.execute("PRAGMA index_list('comics');");
+  console.log('Comics indexes:', indexes.rows);
   const tables = ['genres', 'comics', 'comic_genres', 'chapters', 'chapter_pages'];
   console.log('--- TURSO DATABASE SUMMARY ---');
   for (const t of tables) {
@@ -20,18 +22,31 @@ async function verify() {
     console.log(`${t.padEnd(16)}: ${Number(res.rows[0].c).toLocaleString('id-ID')} rows`);
   }
 
-  // Quick test: fetch sample pages of a chapter that has pages
-  const samplePage = await client.execute('SELECT chapter_id FROM chapter_pages LIMIT 1;');
-  const chId = samplePage.rows[0].chapter_id;
-  const start = Date.now();
-  const pages = await client.execute({
-    sql: 'SELECT * FROM chapter_pages WHERE chapter_id = ? ORDER BY page_number ASC;',
-    args: [chId],
-  });
-  console.log(`\nTest Reader Query for chapter [${chId}]: ${pages.rows.length} pages retrieved in ${Date.now() - start}ms`);
-  if (pages.rows.length > 0) {
-    console.log(`Sample image URL: ${pages.rows[0].image_url}`);
-  }
+  // Benchmark homepage queries
+  const t0 = Date.now();
+  const q1 = client.execute(`
+    SELECT c.id, c.slug, c.title, c.alt_titles, c.type, c.synopsis, c.cover_url,
+      c.author, c.status, c.rating, c.updated_at, c.created_at,
+      c.latest_chapter_number, c.latest_chapter_date,
+      (SELECT json_group_array(json_object('id', g.id, 'name', g.name, 'slug', g.slug))
+       FROM comic_genres cg JOIN genres g ON g.id = cg.genre_id WHERE cg.comic_id = c.id) as genres_json
+    FROM comics c ORDER BY c.updated_at DESC LIMIT 18;
+  `);
+  const q2 = client.execute(`
+    SELECT c.id, c.slug, c.title, c.alt_titles, c.type, c.synopsis, c.cover_url,
+      c.author, c.status, c.rating, c.updated_at, c.created_at,
+      c.latest_chapter_number, c.latest_chapter_date,
+      (SELECT json_group_array(json_object('id', g.id, 'name', g.name, 'slug', g.slug))
+       FROM comic_genres cg JOIN genres g ON g.id = cg.genre_id WHERE cg.comic_id = c.id) as genres_json
+    FROM comics c ORDER BY c.rating DESC LIMIT 10;
+  `);
+  const q3 = client.execute(`
+    SELECT g.id, g.name, g.slug, COUNT(cg.comic_id) as count
+    FROM genres g LEFT JOIN comic_genres cg ON cg.genre_id = g.id
+    GROUP BY g.id, g.name, g.slug ORDER BY g.name ASC;
+  `);
+  await Promise.all([q1, q2, q3]);
+  console.log(`\nHomepage 3 Queries executed in: ${Date.now() - t0}ms`);
 }
 
 verify().catch(console.error);
