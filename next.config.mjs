@@ -2,6 +2,8 @@
 process.env.NEXT_IGNORE_INCORRECT_LOCKFILE = 'true';
 
 const nextConfig = {
+  compress: true,
+  poweredByHeader: false,
   eslint: {
     ignoreDuringBuilds: true,
   },

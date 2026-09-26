@@ -13,8 +13,9 @@ for (const line of envContent.split('\n')) {
 const client = createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN });
 
 async function verify() {
-  const indexes = await client.execute("PRAGMA index_list('comics');");
-  console.log('Comics indexes:', indexes.rows);
+  await client.execute("CREATE INDEX IF NOT EXISTS idx_comic_genres_genre ON comic_genres(genre_id);");
+  const indexes = await client.execute("PRAGMA index_list('comic_genres');");
+  console.log('comic_genres indexes:', indexes.rows);
   const tables = ['genres', 'comics', 'comic_genres', 'chapters', 'chapter_pages'];
   console.log('--- TURSO DATABASE SUMMARY ---');
   for (const t of tables) {
@@ -23,8 +24,8 @@ async function verify() {
   }
 
   // Benchmark homepage queries
-  const t0 = Date.now();
-  const q1 = client.execute(`
+  const t1 = Date.now();
+  const res1 = await client.execute(`
     SELECT c.id, c.slug, c.title, c.alt_titles, c.type, c.synopsis, c.cover_url,
       c.author, c.status, c.rating, c.updated_at, c.created_at,
       c.latest_chapter_number, c.latest_chapter_date,
@@ -32,7 +33,10 @@ async function verify() {
        FROM comic_genres cg JOIN genres g ON g.id = cg.genre_id WHERE cg.comic_id = c.id) as genres_json
     FROM comics c ORDER BY c.updated_at DESC LIMIT 18;
   `);
-  const q2 = client.execute(`
+  console.log('q1 (latest comics 18):', Date.now() - t1, 'ms');
+
+  const t2 = Date.now();
+  const res2 = await client.execute(`
     SELECT c.id, c.slug, c.title, c.alt_titles, c.type, c.synopsis, c.cover_url,
       c.author, c.status, c.rating, c.updated_at, c.created_at,
       c.latest_chapter_number, c.latest_chapter_date,
@@ -40,13 +44,15 @@ async function verify() {
        FROM comic_genres cg JOIN genres g ON g.id = cg.genre_id WHERE cg.comic_id = c.id) as genres_json
     FROM comics c ORDER BY c.rating DESC LIMIT 10;
   `);
-  const q3 = client.execute(`
+  console.log('q2 (popular comics 10):', Date.now() - t2, 'ms');
+
+  const t3 = Date.now();
+  const res3 = await client.execute(`
     SELECT g.id, g.name, g.slug, COUNT(cg.comic_id) as count
     FROM genres g LEFT JOIN comic_genres cg ON cg.genre_id = g.id
     GROUP BY g.id, g.name, g.slug ORDER BY g.name ASC;
   `);
-  await Promise.all([q1, q2, q3]);
-  console.log(`\nHomepage 3 Queries executed in: ${Date.now() - t0}ms`);
+  console.log('q3 (genres with counts):', Date.now() - t3, 'ms');
 }
 
 verify().catch(console.error);
