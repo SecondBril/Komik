@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+process.env.NEXT_IGNORE_INCORRECT_LOCKFILE = 'true';
+
 const nextConfig = {
   images: {
     unoptimized: true,
