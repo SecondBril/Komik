@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import { getTursoClient } from '@/lib/turso';
+import { getTursoComicRelations, saveTursoComicRelations } from '@/lib/queries/turso-comics';
 import { fetchFullComicRelations } from '@/lib/adaptation-service';
 import { MOCK_COMICS } from '@/lib/mock-data';
 
@@ -17,7 +17,6 @@ export async function GET(
   }
 
   const turso = getTursoClient();
-  const supabase = createAdminClient();
   let comicTitle = '';
   let comicId: string | null = null;
 
@@ -36,23 +35,6 @@ export async function GET(
     }
   }
 
-  if (!comicTitle && supabase) {
-    try {
-      const { data: comic } = await supabase
-        .from('comics')
-        .select('id, title, slug')
-        .eq('slug', slug)
-        .maybeSingle();
-
-      if (comic?.title) {
-        comicTitle = comic.title;
-        comicId = comic.id;
-      }
-    } catch (err) {
-      console.warn('[Relations API] Supabase fetch warning:', err);
-    }
-  }
-
   // Fallback to mock data if not in DB
   if (!comicTitle) {
     const mock = MOCK_COMICS.find((c) => c.slug === slug);
@@ -64,15 +46,10 @@ export async function GET(
     }
   }
 
-  // ── HYBRID STEP 1: Check Database Cache First ─────────────────────────────
-  if (supabase && comicId && !forceRefresh) {
+  // ── STEP 1: Check Turso Cache First ───────────────────────────────────────
+  if (turso && comicId && !forceRefresh) {
     try {
-      const { data: cached } = await supabase
-        .from('comic_relations_cache')
-        .select('*')
-        .eq('comic_id', comicId)
-        .maybeSingle();
-
+      const cached = await getTursoComicRelations(comicId);
       if (cached && Array.isArray(cached.franchise_relations)) {
         const cacheAgeDays =
           (Date.now() - new Date(cached.updated_at).getTime()) / (1000 * 60 * 60 * 24);
@@ -82,7 +59,7 @@ export async function GET(
           return NextResponse.json(
             {
               success: true,
-              storage: 'database',
+              storage: 'turso_database',
               data: {
                 title: comicTitle,
                 adaptationCandidates: [],
@@ -102,45 +79,44 @@ export async function GET(
         }
       }
     } catch (err) {
-      console.warn('[Relations API] Cache read warning:', err);
+      console.warn('[Relations API] Turso cache read warning:', err);
     }
   }
 
-  // ── HYBRID STEP 2: On-Demand Fetch from Multi-Source APIs ──────────────────
+  // ── STEP 2: On-Demand Fetch from Multi-Source APIs ────────────────────────
   try {
     const fullRelations = await fetchFullComicRelations(comicTitle);
 
-    // Cross-reference with all comics in DB to attach local reading links
-    if (supabase) {
+    // Cross-reference with comics in Turso to attach local reading links
+    if (turso) {
       try {
-        const { data: allComics } = await supabase
-          .from('comics')
-          .select('id, title, slug, cover_url');
+        const allComicsRes = await turso.execute(`SELECT id, title, slug, cover_url FROM comics;`);
+        const allComics = allComicsRes.rows;
 
         if (allComics && allComics.length > 0) {
           const findLocal = (title: string) => {
             const clean = title.toLowerCase().replace(/[^a-z0-9]/g, '');
-            return allComics.find((c) => {
-              const cClean = c.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return allComics.find((c: any) => {
+              const cClean = String(c.title).toLowerCase().replace(/[^a-z0-9]/g, '');
               return clean.includes(cClean) || cClean.includes(clean);
             });
           };
 
           // Link franchise relations
           fullRelations.franchiseRelations.forEach((rel) => {
-            const match = findLocal(rel.title);
+            const match = findLocal(rel.title) as any;
             if (match && match.slug !== slug) {
-              rel.local_slug = match.slug;
-              if (!rel.cover_url && match.cover_url) rel.cover_url = match.cover_url;
+              rel.local_slug = String(match.slug);
+              if (!rel.cover_url && match.cover_url) rel.cover_url = String(match.cover_url);
             }
           });
 
           // Link recommendations
           fullRelations.recommendations.forEach((rec) => {
-            const match = findLocal(rec.title);
+            const match = findLocal(rec.title) as any;
             if (match && match.slug !== slug) {
-              rec.local_slug = match.slug;
-              if (!rec.cover_url && match.cover_url) rec.cover_url = match.cover_url;
+              rec.local_slug = String(match.slug);
+              if (!rec.cover_url && match.cover_url) rec.cover_url = String(match.cover_url);
             }
           });
         }
@@ -149,31 +125,24 @@ export async function GET(
       }
     }
 
-    // ── HYBRID STEP 3: Persist into Supabase Database ────────────────────────
-    if (supabase && comicId) {
+    // ── STEP 3: Persist into Turso Database ──────────────────────────────────
+    if (turso && comicId) {
       try {
-        await supabase
-          .from('comic_relations_cache')
-          .upsert(
-            {
-              comic_id: comicId,
-              franchise_relations: fullRelations.franchiseRelations,
-              recommendations: fullRelations.recommendations,
-              characters: fullRelations.characters,
-              sources_used: fullRelations.sourcesUsed,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'comic_id' }
-          );
+        await saveTursoComicRelations(comicId, {
+          franchise_relations: fullRelations.franchiseRelations,
+          recommendations: fullRelations.recommendations,
+          characters: fullRelations.characters,
+          sources_used: fullRelations.sourcesUsed,
+        });
       } catch (err: any) {
-        console.warn('[Relations API] Failed to persist cache in DB:', err?.message);
+        console.warn('[Relations API] Failed to persist cache in Turso:', err?.message);
       }
     }
 
     return NextResponse.json(
       {
         success: true,
-        storage: 'api_synced_to_database',
+        storage: 'api_synced_to_turso',
         data: fullRelations,
       },
       {
@@ -183,9 +152,9 @@ export async function GET(
       }
     );
   } catch (err: any) {
-    console.error('[Relations API] Failed to fetch relations:', err);
+    console.error('[Relations API] Exception:', err);
     return NextResponse.json(
-      { success: false, error: err?.message || 'Server error' },
+      { success: false, error: err?.message || 'Failed to process franchise relations' },
       { status: 500 }
     );
   }

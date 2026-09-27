@@ -1,14 +1,10 @@
 import { NextResponse } from 'next/server';
+import { getTursoClient } from '@/lib/turso';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const supabase = createAdminClient();
-  if (!supabase) {
-    return NextResponse.json({ success: false, error: 'Database connection missing' }, { status: 500 });
-  }
-
   const isAlreadyUploaded = (url: string | null | undefined): boolean => {
     if (!url || typeof url !== 'string') return false;
     return (
@@ -17,6 +13,51 @@ export async function GET() {
       !url.includes('undefined')
     );
   };
+
+  const turso = getTursoClient();
+  if (turso) {
+    try {
+      const res = await turso.execute(`
+        SELECT ch.id, ch.chapter_number, ch.title, ch.status, ch.retry_count, ch.released_at, ch.created_at,
+               c.title as comic_title, c.slug as comic_slug,
+               (SELECT COUNT(*) FROM chapter_pages cp WHERE cp.chapter_id = ch.id) as total_pages,
+               (SELECT COUNT(*) FROM chapter_pages cp WHERE cp.chapter_id = ch.id AND (cp.image_url LIKE '%ik.imagekit.io%' OR cp.image_url LIKE '%/api/storage/onedrive%')) as uploaded_pages
+        FROM chapters ch
+        LEFT JOIN comics c ON c.id = ch.comic_id
+        WHERE ch.status IN ('pending', 'processing', 'failed')
+        ORDER BY ch.created_at DESC
+        LIMIT 100;
+      `);
+
+      const formatted = res.rows.map((r: any) => {
+        const totalPages = Number(r.total_pages || 0);
+        const uploadedPages = Number(r.uploaded_pages || 0);
+        return {
+          id: String(r.id),
+          chapter_number: Number(r.chapter_number),
+          chapter_title: `Ch. ${r.chapter_number}${r.title ? ` - ${r.title}` : ''}`,
+          comic_title: String(r.comic_title || 'Unknown Comic'),
+          comic_slug: String(r.comic_slug || ''),
+          status: String(r.status || 'pending'),
+          progress_pages: uploadedPages,
+          total_pages: totalPages,
+          missing_pages: Math.max(0, totalPages - uploadedPages),
+          retry_count: Number(r.retry_count || 0),
+          last_error: null,
+          updated_at: String(r.created_at),
+        };
+      });
+
+      return NextResponse.json({ success: true, data: formatted });
+    } catch (err: any) {
+      console.warn('[Admin Queue GET] Turso error:', err?.message);
+    }
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) {
+    return NextResponse.json({ success: false, error: 'Database connection missing' }, { status: 500 });
+  }
 
   try {
     const { data: chapters, error } = await supabase

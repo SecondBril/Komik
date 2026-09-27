@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/client';
 import { ComicAdaptation } from '@/lib/types';
+import { getTursoClient } from '@/lib/turso';
+import { getTursoComicAdaptations, getTursoChapterAdaptation } from './turso-comics';
 
 /**
  * Fetch all adaptation ranges for a comic, sorted by start_chapter ascending
@@ -7,6 +9,17 @@ import { ComicAdaptation } from '@/lib/types';
 export async function getComicAdaptations(comicId: string): Promise<ComicAdaptation[]> {
   if (!comicId) return [];
 
+  // 1. Prioritaskan Turso (super cepat, 0 beban Supabase)
+  if (getTursoClient()) {
+    try {
+      const tursoData = await getTursoComicAdaptations(comicId);
+      if (tursoData) return tursoData;
+    } catch (tErr) {
+      console.warn('[getComicAdaptations] Turso query error:', tErr);
+    }
+  }
+
+  // 2. Fallback ke Supabase jika Turso tidak aktif
   const supabase = createClient();
   if (!supabase) return [];
 
@@ -42,6 +55,17 @@ export async function getChapterAdaptation(
 ): Promise<ComicAdaptation | null> {
   if (!comicId || isNaN(chapterNumber)) return null;
 
+  // 1. Prioritaskan Turso
+  if (getTursoClient()) {
+    try {
+      const tursoData = await getTursoChapterAdaptation(comicId, chapterNumber);
+      if (tursoData) return tursoData;
+    } catch (tErr) {
+      console.warn('[getChapterAdaptation] Turso query error:', tErr);
+    }
+  }
+
+  // 2. Fallback ke Supabase jika Turso tidak aktif
   const supabase = createClient();
   if (!supabase) return null;
 

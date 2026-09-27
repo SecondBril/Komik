@@ -104,6 +104,36 @@ export async function GET(req: NextRequest) {
           released_at: String(r.released_at),
           status: String(r.status || 'published'),
         }));
+
+        // Fetch adaptation directly from Turso
+        try {
+          const adaptRes = await turso.execute({
+            sql: `SELECT id, comic_id, start_chapter, end_chapter, anime_season, anime_episode_range,
+                         novel_chapter_range, novel_volume, arc_title, note
+                  FROM comic_adaptations
+                  WHERE comic_id = ? AND start_chapter <= ? AND end_chapter >= ?
+                  ORDER BY start_chapter DESC
+                  LIMIT 1;`,
+            args: [comic.id, chapterNumber, chapterNumber],
+          });
+          if (adaptRes.rows.length > 0) {
+            const a = adaptRes.rows[0];
+            adaptation = {
+              id: String(a.id),
+              comic_id: String(a.comic_id),
+              start_chapter: Number(a.start_chapter),
+              end_chapter: Number(a.end_chapter),
+              anime_season: a.anime_season ? String(a.anime_season) : undefined,
+              anime_episode_range: a.anime_episode_range ? String(a.anime_episode_range) : undefined,
+              novel_chapter_range: a.novel_chapter_range ? String(a.novel_chapter_range) : undefined,
+              novel_volume: a.novel_volume ? String(a.novel_volume) : undefined,
+              arc_title: a.arc_title ? String(a.arc_title) : undefined,
+              note: a.note ? String(a.note) : undefined,
+            };
+          }
+        } catch {
+          // ignore adaptation lookup error
+        }
       }
     } catch (err: any) {
       console.warn('[Reader API] Turso query error:', err?.message);

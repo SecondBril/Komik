@@ -254,8 +254,8 @@ async function saveChapterPagesToDb(supabase, chapterId, images) {
     }
   }
 
-  // 2. Simpan ke Supabase jika tersedia
-  if (supabase) {
+  // 2. Simpan ke Supabase HANYA jika Turso tidak aktif (Turso aktif = 0 beban disk Supabase)
+  if (supabase && !turso) {
     try {
       const pageRows = images.map((url, idx) => ({
         chapter_id: chapterId,

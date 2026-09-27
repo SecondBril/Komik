@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getTursoClient } from '@/lib/turso';
+import {
+  getTursoAdminComics,
+  updateTursoAdminComic,
+  deleteTursoAdminComic,
+} from '@/lib/queries/turso-comics';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { deleteImageKitFolder } from '@/lib/imagekit-admin';
 
 export async function GET() {
+  if (getTursoClient()) {
+    try {
+      const comics = await getTursoAdminComics();
+      return NextResponse.json({ success: true, data: comics });
+    } catch (err: any) {
+      console.warn('[Admin Comics GET] Turso error:', err?.message);
+    }
+  }
+
   const supabase = createAdminClient();
   if (!supabase) {
     return NextResponse.json({ success: false, error: 'Database connection missing' }, { status: 500 });
@@ -44,17 +59,34 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const supabase = createAdminClient();
-  if (!supabase) {
-    return NextResponse.json({ success: false, error: 'Database client missing' }, { status: 500 });
-  }
-
   try {
     const body = await req.json();
     const { id, title, slug, synopsis, author, status, type, cover_url, rating, genre_ids } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Parameter id komik wajib diisi' }, { status: 400 });
+    }
+
+    if (getTursoClient()) {
+      const ok = await updateTursoAdminComic(id, {
+        title,
+        slug,
+        synopsis,
+        author,
+        status,
+        type,
+        cover_url,
+        rating,
+        genre_ids,
+      });
+      if (ok) {
+        return NextResponse.json({ success: true, message: 'Komik berhasil diperbarui di Turso.' });
+      }
+    }
+
+    const supabase = createAdminClient();
+    if (!supabase) {
+      return NextResponse.json({ success: false, error: 'Database client missing' }, { status: 500 });
     }
 
     const updateFields: Record<string, any> = {};
@@ -80,19 +112,13 @@ export async function PUT(req: NextRequest) {
 
     // Update genres relation if genre_ids is provided
     if (Array.isArray(genre_ids)) {
-      // 1. Remove existing genre relations
       await supabase.from('comic_genres').delete().eq('comic_id', id);
-
-      // 2. Insert new genre relations
       if (genre_ids.length > 0) {
         const rows = genre_ids.map((genre_id: number) => ({
           comic_id: id,
           genre_id: Number(genre_id),
         }));
-        const { error: insertError } = await supabase.from('comic_genres').insert(rows);
-        if (insertError) {
-          console.error('[Admin Comics] Failed to update comic_genres:', insertError.message);
-        }
+        await supabase.from('comic_genres').insert(rows);
       }
     }
 
@@ -110,13 +136,35 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Parameter id komik wajib diisi' }, { status: 400 });
   }
 
+  const turso = getTursoClient();
+  if (turso) {
+    try {
+      // 1. Get comic slug for ImageKit cleanup
+      const res = await turso.execute({
+        sql: `SELECT slug FROM comics WHERE id = ? LIMIT 1;`,
+        args: [comicId],
+      });
+      if (res.rows.length > 0 && res.rows[0].slug) {
+        const folderPath = `comics/${res.rows[0].slug}`;
+        deleteImageKitFolder(folderPath).catch(() => {});
+      }
+
+      await deleteTursoAdminComic(comicId);
+      return NextResponse.json({
+        success: true,
+        message: 'Komik berhasil dihapus dari Turso.',
+      });
+    } catch (err: any) {
+      console.warn('[Admin Comic DELETE] Turso error:', err?.message);
+    }
+  }
+
   const supabase = createAdminClient();
   if (!supabase) {
     return NextResponse.json({ success: false, error: 'Database client missing' }, { status: 500 });
   }
 
   try {
-    // 1. Get the comic slug for ImageKit folder path
     const { data: comic } = await supabase
       .from('comics')
       .select('slug')
@@ -125,16 +173,10 @@ export async function DELETE(req: NextRequest) {
 
     if (comic?.slug) {
       const folderPath = `comics/${comic.slug}`;
-      const ikResult = await deleteImageKitFolder(folderPath);
-      if (!ikResult.success) {
-        console.warn(`[Admin Comic Delete] ImageKit cleanup warning for ${folderPath}:`, ikResult.message);
-      }
+      deleteImageKitFolder(folderPath).catch(() => {});
     }
 
-    // 2. Delete comic_genres junction rows first
     await supabase.from('comic_genres').delete().eq('comic_id', comicId);
-
-    // 3. Delete from Supabase
     const { error } = await supabase.from('comics').delete().eq('id', comicId);
 
     if (error) {

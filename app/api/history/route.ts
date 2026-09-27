@@ -7,7 +7,7 @@ import {
   deleteTursoReadingHistory,
 } from '@/lib/queries/turso-comics';
 
-// GET /api/history — Ambil semua riwayat baca user (Turso dengan fallback Supabase)
+// GET /api/history — Ambil semua riwayat baca user (Auth di Supabase, Data di Turso)
 export async function GET() {
   const supabase = createServerSupabaseClient();
   if (!supabase) {
@@ -21,43 +21,46 @@ export async function GET() {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }
 
-  // 1. Prioritaskan Turso (super cepat ~10ms)
+  // 1. Prioritaskan Turso (super cepat ~10ms, 0 Supabase disk/quota)
   if (getTursoClient()) {
     try {
       const tursoHistory = await getTursoReadingHistory(user.id);
-      if (tursoHistory && tursoHistory.length > 0) {
-        return NextResponse.json({ success: true, data: tursoHistory });
-      }
+      return NextResponse.json({ success: true, data: tursoHistory || [] });
     } catch (err) {
       console.warn('[History API GET] Turso query failed, falling back:', err);
     }
   }
 
-  const { data, error } = await supabase
-    .from('reading_history')
-    .select(
+  // 2. Fallback Supabase hanya jika Turso tidak aktif
+  try {
+    const { data, error } = await supabase
+      .from('reading_history')
+      .select(
+        `
+        id,
+        comic_id,
+        chapter_id,
+        scroll_position,
+        last_read_at,
+        comic:comics(id, slug, title, cover_url, type, author, status, rating, alt_titles, synopsis, created_at, updated_at),
+        chapter:chapters(id, comic_id, chapter_number, title, status, retry_count, released_at, created_at)
       `
-      id,
-      comic_id,
-      chapter_id,
-      scroll_position,
-      last_read_at,
-      comic:comics(id, slug, title, cover_url, type, author, status, rating, alt_titles, synopsis, created_at, updated_at),
-      chapter:chapters(id, comic_id, chapter_number, title, status, retry_count, released_at, created_at)
-    `
-    )
-    .eq('user_id', user.id)
-    .order('last_read_at', { ascending: false })
-    .limit(500);
+      )
+      .eq('user_id', user.id)
+      .order('last_read_at', { ascending: false })
+      .limit(500);
 
-  if (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, data: data || [] });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err?.message || 'Server error' }, { status: 500 });
   }
-
-  return NextResponse.json({ success: true, data: data || [] });
 }
 
-// POST /api/history — Simpan chapter yang dibaca ke Supabase (single atau bulk upsert per user+chapter)
+// POST /api/history — Simpan chapter yang dibaca (Auth di Supabase, Storage di Turso)
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
@@ -70,11 +73,10 @@ export async function POST(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    // Bukan error — guest tidak perlu cloud sync
+    // Guest tidak disimpan ke cloud
     return NextResponse.json({ success: true, message: 'Guest session, not saved to cloud' });
   }
 
-  // Normalisasi input: bisa single item { comic_id, chapter_id, ... } atau array { items: [...] }
   const rawItems: any[] = Array.isArray(body.items)
     ? body.items
     : (body.comic_id || body.chapter_id ? [body] : []);
@@ -87,6 +89,7 @@ export async function POST(req: NextRequest) {
     typeof val === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
+  const turso = getTursoClient();
   const rowsToUpsert: Array<{
     user_id: string;
     comic_id: string;
@@ -111,32 +114,36 @@ export async function POST(req: NextRequest) {
     // 1. Resolve comic_id jika bukan UUID
     if (!isUuid(comicId)) {
       const slugToLookup = comicSlug || comicId;
-      if (slugToLookup) {
-        const { data: comicRow } = await supabase
-          .from('comics')
-          .select('id')
-          .eq('slug', slugToLookup)
-          .maybeSingle();
-        if (comicRow) {
-          comicId = comicRow.id;
+      if (slugToLookup && turso) {
+        try {
+          const cRes = await turso.execute({
+            sql: `SELECT id FROM comics WHERE slug = ? LIMIT 1;`,
+            args: [slugToLookup],
+          });
+          if (cRes.rows.length > 0) {
+            comicId = String(cRes.rows[0].id);
+          }
+        } catch {
+          // ignore
         }
       }
     }
 
     // 2. Resolve chapter_id jika bukan UUID
-    if (!isUuid(chapterId) && isUuid(comicId) && chapterNumber !== undefined && !isNaN(chapterNumber)) {
-      const { data: chRow } = await supabase
-        .from('chapters')
-        .select('id')
-        .eq('comic_id', comicId)
-        .eq('chapter_number', chapterNumber)
-        .maybeSingle();
-      if (chRow) {
-        chapterId = chRow.id;
+    if (!isUuid(chapterId) && isUuid(comicId) && chapterNumber !== undefined && !isNaN(chapterNumber) && turso) {
+      try {
+        const chRes = await turso.execute({
+          sql: `SELECT id FROM chapters WHERE comic_id = ? AND chapter_number = ? LIMIT 1;`,
+          args: [comicId, chapterNumber],
+        });
+        if (chRes.rows.length > 0) {
+          chapterId = String(chRes.rows[0].id);
+        }
+      } catch {
+        // ignore
       }
     }
 
-    // Validasi akhir: pastikan comicId dan chapterId sudah berbentuk UUID valid
     if (isUuid(comicId) && isUuid(chapterId)) {
       rowsToUpsert.push({
         user_id: user.id,
@@ -156,43 +163,41 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Deduplicate by chapter_id (keep latest)
+  // Deduplicate by chapter_id
   const dedupedMap = new Map<string, (typeof rowsToUpsert)[0]>();
   for (const row of rowsToUpsert) {
     dedupedMap.set(row.chapter_id, row);
   }
   const dedupedRows = Array.from(dedupedMap.values());
 
-  // 1. Sync ke Turso
-  if (getTursoClient()) {
+  // 1. Simpan eksklusif ke Turso
+  if (turso) {
     try {
       await upsertTursoReadingHistory(user.id, dedupedRows);
+      return NextResponse.json({ success: true, count: dedupedRows.length, data: dedupedRows });
     } catch (tursoErr) {
       console.warn('[API History POST] Turso upsert warning:', tursoErr);
     }
   }
 
-  // 2. Sync ke Supabase
-  let data: any = null;
-  const { data: supaData, error } = await supabase
-    .from('reading_history')
-    .upsert(dedupedRows, { onConflict: 'user_id,chapter_id' })
-    .select();
+  // 2. Fallback Supabase jika Turso tidak tersedia
+  try {
+    const { data: supaData, error } = await supabase
+      .from('reading_history')
+      .upsert(dedupedRows, { onConflict: 'user_id,chapter_id' })
+      .select();
 
-  if (error) {
-    console.warn('[API History POST] Supabase upsert error:', error.message);
-  } else {
-    data = supaData;
+    if (error) {
+      console.warn('[API History POST] Supabase upsert error:', error.message);
+    }
+
+    return NextResponse.json({ success: true, count: dedupedRows.length, data: supaData });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err?.message || 'Save error' }, { status: 500 });
   }
-
-  return NextResponse.json({ success: true, count: dedupedRows.length, data });
 }
 
-// DELETE /api/history — Hapus riwayat baca
-// Query params:
-//   ?chapterId=xxx  → hapus 1 chapter spesifik
-//   ?comicId=xxx    → hapus semua chapter dari 1 komik
-//   (tanpa param)   → hapus seluruh history user
+// DELETE /api/history — Hapus riwayat baca (Auth di Supabase, Storage di Turso)
 export async function DELETE(req: NextRequest) {
   const supabase = createServerSupabaseClient();
   if (!supabase) {
@@ -217,24 +222,23 @@ export async function DELETE(req: NextRequest) {
         chapterId: chapterId || undefined,
         comicId: comicId || undefined,
       });
+      return NextResponse.json({ success: true });
     } catch (tursoErr) {
       console.warn('[API History DELETE] Turso error:', tursoErr);
     }
   }
 
-  // 2. Hapus dari Supabase
-  let query = supabase.from('reading_history').delete().eq('user_id', user.id);
-
-  if (chapterId) {
-    query = query.eq('chapter_id', chapterId);
-  } else if (comicId) {
-    query = query.eq('comic_id', comicId);
-  }
-  // else: hapus semua history user ini
-
-  const { error } = await query;
-  if (error) {
-    console.warn('[API History DELETE] Supabase error:', error.message);
+  // 2. Fallback Supabase jika Turso tidak aktif
+  try {
+    let query = supabase.from('reading_history').delete().eq('user_id', user.id);
+    if (chapterId) {
+      query = query.eq('chapter_id', chapterId);
+    } else if (comicId) {
+      query = query.eq('comic_id', comicId);
+    }
+    await query;
+  } catch (err) {
+    console.warn('[API History DELETE] Supabase error:', err);
   }
 
   return NextResponse.json({ success: true });

@@ -131,30 +131,35 @@ export async function checkDailyRateLimit(
   const allowed = currentCount <= limit;
   const remaining = Math.max(0, limit - currentCount);
 
-  // 2. Sinkronisasi Asinkron ke Supabase jika tabel tersedia
+  // 2. Sinkronisasi Asinkron ke Turso jika tabel tersedia
   // (Dijalankan tanpa memblokir response jika koneksi lambat)
   try {
-    const supabase = createAdminClient();
-    if (supabase) {
-      // Upsert atomic di Supabase Postgres
+    const { getTursoClient } = await import('@/lib/turso');
+    const turso = getTursoClient();
+    if (turso) {
       Promise.resolve(
-        supabase
-          .from('daily_request_quotas')
-          .upsert(
-            {
-              identifier,
-              date: todayWib,
-              request_count: currentCount,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'identifier,date' }
-          )
+        turso.execute({
+          sql: `
+            INSERT INTO daily_request_quotas (id, ip_address, request_date, request_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(ip_address, request_date) DO UPDATE SET
+              request_count = excluded.request_count,
+              updated_at = excluded.updated_at;
+          `,
+          args: [
+            `quota_${identifier}_${todayWib}`,
+            identifier,
+            todayWib,
+            currentCount,
+            new Date().toISOString(),
+          ],
+        })
       )
         .then(() => {})
         .catch(() => {});
     }
   } catch {
-    // Abaikan jika tabel belum ada atau DB sibuk
+    // Abaikan jika DB sibuk
   }
 
   return {

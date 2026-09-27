@@ -1,5 +1,5 @@
 import { getTursoClient } from '../turso';
-import { Comic, FilterState, Genre, Chapter, ChapterPage } from '../types';
+import { Comic, FilterState, Genre, Chapter, ChapterPage, ComicAdaptation } from '../types';
 
 let cachedTursoGenresWithCounts: (Genre & { count: number })[] | null = null;
 let lastTursoGenresFetchedAt = 0;
@@ -659,5 +659,423 @@ export async function deleteTursoReadingHistory(
   } catch (err) {
     console.error('[deleteTursoReadingHistory] Error:', err);
     return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADAPTATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getTursoComicAdaptations(comicId: string): Promise<ComicAdaptation[]> {
+  const turso = getTursoClient();
+  if (!turso || !comicId) return [];
+
+  try {
+    const res = await turso.execute({
+      sql: `SELECT id, comic_id, start_chapter, end_chapter, anime_season, anime_episode_range,
+                   novel_chapter_range, novel_volume, arc_title, note, created_at, updated_at
+            FROM comic_adaptations
+            WHERE comic_id = ?
+            ORDER BY start_chapter ASC;`,
+      args: [comicId],
+    });
+
+    return res.rows.map((r: any) => ({
+      id: String(r.id),
+      comic_id: String(r.comic_id),
+      start_chapter: Number(r.start_chapter),
+      end_chapter: Number(r.end_chapter),
+      anime_season: r.anime_season ? String(r.anime_season) : undefined,
+      anime_episode_range: r.anime_episode_range ? String(r.anime_episode_range) : undefined,
+      novel_chapter_range: r.novel_chapter_range ? String(r.novel_chapter_range) : undefined,
+      novel_volume: r.novel_volume ? String(r.novel_volume) : undefined,
+      arc_title: r.arc_title ? String(r.arc_title) : undefined,
+      note: r.note ? String(r.note) : undefined,
+      created_at: r.created_at ? String(r.created_at) : undefined,
+      updated_at: r.updated_at ? String(r.updated_at) : undefined,
+    }));
+  } catch (err) {
+    console.error('[getTursoComicAdaptations] Error:', err);
+    return [];
+  }
+}
+
+export async function getTursoChapterAdaptation(
+  comicId: string,
+  chapterNumber: number
+): Promise<ComicAdaptation | null> {
+  const turso = getTursoClient();
+  if (!turso || !comicId || isNaN(chapterNumber)) return null;
+
+  try {
+    const res = await turso.execute({
+      sql: `SELECT id, comic_id, start_chapter, end_chapter, anime_season, anime_episode_range,
+                   novel_chapter_range, novel_volume, arc_title, note, created_at, updated_at
+            FROM comic_adaptations
+            WHERE comic_id = ? AND start_chapter <= ? AND end_chapter >= ?
+            ORDER BY start_chapter DESC
+            LIMIT 1;`,
+      args: [comicId, chapterNumber, chapterNumber],
+    });
+
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    return {
+      id: String(r.id),
+      comic_id: String(r.comic_id),
+      start_chapter: Number(r.start_chapter),
+      end_chapter: Number(r.end_chapter),
+      anime_season: r.anime_season ? String(r.anime_season) : undefined,
+      anime_episode_range: r.anime_episode_range ? String(r.anime_episode_range) : undefined,
+      novel_chapter_range: r.novel_chapter_range ? String(r.novel_chapter_range) : undefined,
+      novel_volume: r.novel_volume ? String(r.novel_volume) : undefined,
+      arc_title: r.arc_title ? String(r.arc_title) : undefined,
+      note: r.note ? String(r.note) : undefined,
+      created_at: r.created_at ? String(r.created_at) : undefined,
+      updated_at: r.updated_at ? String(r.updated_at) : undefined,
+    };
+  } catch (err) {
+    console.error('[getTursoChapterAdaptation] Error:', err);
+    return null;
+  }
+}
+
+export async function insertTursoAdaptation(item: {
+  comic_id: string;
+  start_chapter: number;
+  end_chapter: number;
+  anime_season?: string | null;
+  anime_episode_range?: string | null;
+  novel_chapter_range?: string | null;
+  novel_volume?: string | null;
+  arc_title?: string | null;
+  note?: string | null;
+}): Promise<any> {
+  const turso = getTursoClient();
+  if (!turso) throw new Error('Turso client not available');
+
+  const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ca_${Date.now()}`;
+  const now = new Date().toISOString();
+
+  await turso.execute({
+    sql: `INSERT INTO comic_adaptations (
+      id, comic_id, start_chapter, end_chapter, anime_season, anime_episode_range,
+      novel_chapter_range, novel_volume, arc_title, note, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    args: [
+      id,
+      item.comic_id,
+      Number(item.start_chapter),
+      Number(item.end_chapter),
+      item.anime_season || null,
+      item.anime_episode_range || null,
+      item.novel_chapter_range || null,
+      item.novel_volume || null,
+      item.arc_title || null,
+      item.note || null,
+      now,
+      now,
+    ],
+  });
+
+  return { id, ...item, created_at: now, updated_at: now };
+}
+
+export async function updateTursoAdaptation(id: string, fields: any): Promise<any> {
+  const turso = getTursoClient();
+  if (!turso) throw new Error('Turso client not available');
+
+  const sets: string[] = ['updated_at = ?'];
+  const now = new Date().toISOString();
+  const args: any[] = [now];
+
+  if (fields.start_chapter !== undefined) {
+    sets.push('start_chapter = ?');
+    args.push(Number(fields.start_chapter));
+  }
+  if (fields.end_chapter !== undefined) {
+    sets.push('end_chapter = ?');
+    args.push(Number(fields.end_chapter));
+  }
+  if (fields.anime_season !== undefined) {
+    sets.push('anime_season = ?');
+    args.push(fields.anime_season || null);
+  }
+  if (fields.anime_episode_range !== undefined) {
+    sets.push('anime_episode_range = ?');
+    args.push(fields.anime_episode_range || null);
+  }
+  if (fields.novel_chapter_range !== undefined) {
+    sets.push('novel_chapter_range = ?');
+    args.push(fields.novel_chapter_range || null);
+  }
+  if (fields.novel_volume !== undefined) {
+    sets.push('novel_volume = ?');
+    args.push(fields.novel_volume || null);
+  }
+  if (fields.arc_title !== undefined) {
+    sets.push('arc_title = ?');
+    args.push(fields.arc_title || null);
+  }
+  if (fields.note !== undefined) {
+    sets.push('note = ?');
+    args.push(fields.note || null);
+  }
+
+  args.push(id);
+  await turso.execute({
+    sql: `UPDATE comic_adaptations SET ${sets.join(', ')} WHERE id = ?;`,
+    args,
+  });
+
+  const res = await turso.execute({
+    sql: `SELECT * FROM comic_adaptations WHERE id = ? LIMIT 1;`,
+    args: [id],
+  });
+  return res.rows[0] || null;
+}
+
+export async function deleteTursoAdaptation(id: string): Promise<boolean> {
+  const turso = getTursoClient();
+  if (!turso) return false;
+
+  await turso.execute({
+    sql: `DELETE FROM comic_adaptations WHERE id = ?;`,
+    args: [id],
+  });
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMIC RELATIONS CACHE
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getTursoComicRelations(comicId: string): Promise<any | null> {
+  const turso = getTursoClient();
+  if (!turso || !comicId) return null;
+
+  try {
+    const res = await turso.execute({
+      sql: `SELECT id, comic_id, franchise_relations, recommendations, characters, sources_used, updated_at
+            FROM comic_relations_cache WHERE comic_id = ? LIMIT 1;`,
+      args: [comicId],
+    });
+
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    return {
+      id: String(r.id),
+      comic_id: String(r.comic_id),
+      franchise_relations: typeof r.franchise_relations === 'string' ? JSON.parse(r.franchise_relations) : (r.franchise_relations || []),
+      recommendations: typeof r.recommendations === 'string' ? JSON.parse(r.recommendations) : (r.recommendations || []),
+      characters: typeof r.characters === 'string' ? JSON.parse(r.characters) : (r.characters || []),
+      sources_used: typeof r.sources_used === 'string' ? JSON.parse(r.sources_used) : (r.sources_used || []),
+      updated_at: String(r.updated_at),
+    };
+  } catch (err) {
+    console.error('[getTursoComicRelations] Error:', err);
+    return null;
+  }
+}
+
+export async function saveTursoComicRelations(
+  comicId: string,
+  data: {
+    franchise_relations: any[];
+    recommendations: any[];
+    characters: any[];
+    sources_used: string[];
+  }
+): Promise<boolean> {
+  const turso = getTursoClient();
+  if (!turso || !comicId) return false;
+
+  try {
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `rel_${Date.now()}`;
+    const now = new Date().toISOString();
+    await turso.execute({
+      sql: `
+        INSERT INTO comic_relations_cache (id, comic_id, franchise_relations, recommendations, characters, sources_used, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(comic_id) DO UPDATE SET
+          franchise_relations = excluded.franchise_relations,
+          recommendations = excluded.recommendations,
+          characters = excluded.characters,
+          sources_used = excluded.sources_used,
+          updated_at = excluded.updated_at;
+      `,
+      args: [
+        id,
+        comicId,
+        JSON.stringify(data.franchise_relations || []),
+        JSON.stringify(data.recommendations || []),
+        JSON.stringify(data.characters || []),
+        JSON.stringify(data.sources_used || []),
+        now,
+      ],
+    });
+    return true;
+  } catch (err) {
+    console.error('[saveTursoComicRelations] Error:', err);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN OPERATIONS (Comics, Chapters, Sources, Logs)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getTursoAdminComics(): Promise<any[]> {
+  const turso = getTursoClient();
+  if (!turso) return [];
+
+  try {
+    const res = await turso.execute(`
+      SELECT c.id, c.title, c.slug, c.type, c.cover_url, c.status, c.author, c.synopsis, c.rating, c.created_at,
+             (
+               SELECT json_group_array(json_object('id', g.id, 'name', g.name, 'slug', g.slug))
+               FROM comic_genres cg
+               JOIN genres g ON g.id = cg.genre_id
+               WHERE cg.comic_id = c.id
+             ) as genres_json,
+             (
+               SELECT COUNT(*) FROM chapters ch WHERE ch.comic_id = c.id
+             ) as total_chapters
+      FROM comics c
+      ORDER BY c.title ASC;
+    `);
+
+    return res.rows.map((r: any) => {
+      let genres: any[] = [];
+      try {
+        if (typeof r.genres_json === 'string') {
+          genres = JSON.parse(r.genres_json).filter((g: any) => g && g.id);
+        }
+      } catch {}
+
+      return {
+        id: String(r.id),
+        title: String(r.title),
+        slug: String(r.slug),
+        type: String(r.type || 'manhwa'),
+        cover_url: String(r.cover_url || ''),
+        status: String(r.status || 'ongoing'),
+        author: String(r.author || 'Unknown'),
+        synopsis: String(r.synopsis || ''),
+        rating: Number(r.rating || 4.5),
+        created_at: String(r.created_at),
+        genres,
+        total_chapters: Number(r.total_chapters || 0),
+      };
+    });
+  } catch (err) {
+    console.error('[getTursoAdminComics] Error:', err);
+    return [];
+  }
+}
+
+export async function updateTursoAdminComic(id: string, fields: any): Promise<boolean> {
+  const turso = getTursoClient();
+  if (!turso) return false;
+
+  try {
+    const sets: string[] = ['updated_at = ?'];
+    const now = new Date().toISOString();
+    const args: any[] = [now];
+
+    if (fields.title !== undefined) { sets.push('title = ?'); args.push(fields.title); }
+    if (fields.slug !== undefined) { sets.push('slug = ?'); args.push(fields.slug); }
+    if (fields.synopsis !== undefined) { sets.push('synopsis = ?'); args.push(fields.synopsis); }
+    if (fields.author !== undefined) { sets.push('author = ?'); args.push(fields.author); }
+    if (fields.status !== undefined) { sets.push('status = ?'); args.push(fields.status); }
+    if (fields.type !== undefined) { sets.push('type = ?'); args.push(fields.type); }
+    if (fields.cover_url !== undefined) { sets.push('cover_url = ?'); args.push(fields.cover_url); }
+    if (fields.rating !== undefined) { sets.push('rating = ?'); args.push(Number(fields.rating)); }
+
+    args.push(id);
+    await turso.execute({
+      sql: `UPDATE comics SET ${sets.join(', ')} WHERE id = ?;`,
+      args,
+    });
+
+    if (Array.isArray(fields.genre_ids)) {
+      await turso.execute({
+        sql: `DELETE FROM comic_genres WHERE comic_id = ?;`,
+        args: [id],
+      });
+      for (const gid of fields.genre_ids) {
+        await turso.execute({
+          sql: `INSERT OR IGNORE INTO comic_genres (comic_id, genre_id) VALUES (?, ?);`,
+          args: [id, Number(gid)],
+        });
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[updateTursoAdminComic] Error:', err);
+    return false;
+  }
+}
+
+export async function deleteTursoAdminComic(id: string): Promise<boolean> {
+  const turso = getTursoClient();
+  if (!turso) return false;
+
+  try {
+    await turso.execute({ sql: `DELETE FROM chapter_pages WHERE chapter_id IN (SELECT id FROM chapters WHERE comic_id = ?);`, args: [id] });
+    await turso.execute({ sql: `DELETE FROM chapters WHERE comic_id = ?;`, args: [id] });
+    await turso.execute({ sql: `DELETE FROM comic_genres WHERE comic_id = ?;`, args: [id] });
+    await turso.execute({ sql: `DELETE FROM comic_adaptations WHERE comic_id = ?;`, args: [id] });
+    await turso.execute({ sql: `DELETE FROM comic_relations_cache WHERE comic_id = ?;`, args: [id] });
+    await turso.execute({ sql: `DELETE FROM reading_history WHERE comic_id = ?;`, args: [id] });
+    await turso.execute({ sql: `DELETE FROM comics WHERE id = ?;`, args: [id] });
+    return true;
+  } catch (err) {
+    console.error('[deleteTursoAdminComic] Error:', err);
+    return false;
+  }
+}
+
+export async function getTursoAdminSources(): Promise<any[]> {
+  const turso = getTursoClient();
+  if (!turso) return [];
+
+  try {
+    const res = await turso.execute(`SELECT id, name, base_url, scraping_config, is_active, created_at FROM sources ORDER BY created_at DESC;`);
+    return res.rows.map((r: any) => ({
+      id: String(r.id),
+      name: String(r.name),
+      base_url: String(r.base_url),
+      scraping_config: typeof r.scraping_config === 'string' ? JSON.parse(r.scraping_config) : (r.scraping_config || {}),
+      is_active: Boolean(r.is_active),
+      created_at: String(r.created_at),
+    }));
+  } catch (err) {
+    console.error('[getTursoAdminSources] Error:', err);
+    return [];
+  }
+}
+
+export async function getTursoAdminLogs(limit = 100): Promise<any[]> {
+  const turso = getTursoClient();
+  if (!turso) return [];
+
+  try {
+    const res = await turso.execute({
+      sql: `SELECT id, source_id, chapter_id, level, message, created_at FROM ingest_logs ORDER BY created_at DESC LIMIT ?;`,
+      args: [limit],
+    });
+    return res.rows.map((r: any) => ({
+      id: String(r.id),
+      source_id: r.source_id ? String(r.source_id) : null,
+      chapter_id: r.chapter_id ? String(r.chapter_id) : null,
+      level: String(r.level),
+      message: String(r.message),
+      created_at: String(r.created_at),
+    }));
+  } catch (err) {
+    console.error('[getTursoAdminLogs] Error:', err);
+    return [];
   }
 }

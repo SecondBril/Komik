@@ -1,8 +1,10 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getTursoClient } from '@/lib/turso';
 import { parseWestmangaContentsHTML } from '@/workers/scraper/westmanga-contents';
 import { fetchComicMetadata, syncWorkerComicGenres } from '@/workers/lib/comic-metadata';
 import puppeteer, { Browser } from 'puppeteer-core';
 import { getChromeExecutablePath } from './live-chapter-scraper';
+import crypto from 'crypto';
 
 export interface SyncStats {
   pagesScanned: number;
@@ -399,9 +401,10 @@ export async function syncSingleComic(slug: string): Promise<{
   chaptersCount?: number;
   error?: string;
 }> {
+  const turso = getTursoClient();
   const supabase = createAdminClient();
-  if (!supabase) {
-    return { success: false, error: 'Database admin connection not available' };
+  if (!turso && !supabase) {
+    return { success: false, error: 'Database connection not available' };
   }
 
   const chromePath = getChromeExecutablePath();
@@ -423,77 +426,92 @@ export async function syncSingleComic(slug: string): Promise<{
       return { success: false, error: `Comic ${slug} not found on source` };
     }
 
-    // Check or insert comic
-    let { data: comic } = await supabase
-      .from('comics')
-      .select('id, title, slug')
-      .eq('slug', slug)
-      .maybeSingle();
+    let comic: any = null;
 
-    if (!comic) {
-      const meta = await fetchComicMetadata(detail.title).catch(() => null);
-      const { data: newComic, error: createErr } = await supabase
-        .from('comics')
-        .insert({
-          slug,
-          title: meta?.title || detail.title,
-          type: (meta?.type as any) || detail.type || 'manhwa',
-          synopsis: meta?.synopsis || detail.synopsis,
-          cover_url: meta?.cover_url || detail.coverUrl,
-          author: meta?.author || 'Unknown Author',
-          rating: meta?.rating || 4.5,
-          status: (meta?.status as any) || 'ongoing',
-        })
-        .select('id, title, slug')
-        .single();
-
-      if (createErr || !newComic) {
-        return { success: false, error: createErr?.message || 'Failed creating comic' };
-      }
-      comic = newComic;
-
-      if (meta?.genres && meta.genres.length > 0) {
-        await syncWorkerComicGenres(supabase, comic.id, meta.genres).catch(() => {});
+    if (turso) {
+      const cRes = await turso.execute({
+        sql: `SELECT id, title, slug FROM comics WHERE slug = ? LIMIT 1;`,
+        args: [slug],
+      });
+      if (cRes.rows.length > 0) {
+        comic = {
+          id: String(cRes.rows[0].id),
+          title: String(cRes.rows[0].title),
+          slug: String(cRes.rows[0].slug),
+        };
       }
     }
 
-    // Upsert chapters in batches of 100 and purge any bogus/ghost chapters from DB
-    if (detail.chapters.length > 0) {
+    if (!comic && supabase) {
+      const { data } = await supabase
+        .from('comics')
+        .select('id, title, slug')
+        .eq('slug', slug)
+        .maybeSingle();
+      comic = data;
+    }
+
+    if (!comic) {
+      const meta = await fetchComicMetadata(detail.title).catch(() => null);
+      const finalTitle = meta?.title || detail.title;
+      const finalType = (meta?.type as any) || detail.type || 'manhwa';
+      const finalSynopsis = meta?.synopsis || detail.synopsis;
+      const finalCover = meta?.cover_url || detail.coverUrl;
+      const finalAuthor = meta?.author || 'Unknown Author';
+      const finalRating = meta?.rating || 4.5;
+      const finalStatus = (meta?.status as any) || 'ongoing';
+      const finalId = crypto.randomUUID();
+
+      if (turso) {
+        await turso.execute({
+          sql: `INSERT INTO comics (id, slug, title, type, synopsis, cover_url, author, rating, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          args: [
+            finalId, slug, finalTitle, finalType, finalSynopsis, finalCover, finalAuthor, finalRating, finalStatus,
+            new Date().toISOString(), new Date().toISOString()
+          ],
+        });
+        comic = { id: finalId, title: finalTitle, slug };
+      } else if (supabase) {
+        const { data: newComic } = await supabase
+          .from('comics')
+          .insert({
+            slug, title: finalTitle, type: finalType, synopsis: finalSynopsis,
+            cover_url: finalCover, author: finalAuthor, rating: finalRating, status: finalStatus,
+          })
+          .select('id, title, slug')
+          .single();
+        comic = newComic;
+      }
+    }
+
+    // Upsert chapters
+    if (detail.chapters.length > 0 && comic?.id) {
       const validNums = new Set(detail.chapters.map((ch) => ch.chapterNumber));
 
-      // 1. Bersihkan chapter fiktif/hantu (misal chapter sidebar 169, 27, dll yang sebelumnya salah masuk)
-      const { data: dbChs } = await supabase
-        .from('chapters')
-        .select('id, chapter_number')
-        .eq('comic_id', comic.id);
-
-      if (dbChs && dbChs.length > 0) {
-        const ghostChs = dbChs.filter((ch) => !validNums.has(ch.chapter_number));
-        if (ghostChs.length > 0) {
-          const ghostIds = ghostChs.map((ch) => ch.id);
-          await supabase.from('chapter_pages').delete().in('chapter_id', ghostIds);
-          await supabase.from('chapters').delete().in('id', ghostIds);
-          console.log(`[CatalogSync] Berhasil menghapus ${ghostIds.length} chapter fiktif untuk "${slug}".`);
+      if (turso) {
+        const dbChRes = await turso.execute({
+          sql: `SELECT id, chapter_number FROM chapters WHERE comic_id = ?;`,
+          args: [comic.id],
+        });
+        const ghostChs = dbChRes.rows.filter((ch: any) => !validNums.has(Number(ch.chapter_number)));
+        for (const g of ghostChs) {
+          await turso.execute({ sql: `DELETE FROM chapter_pages WHERE chapter_id = ?;`, args: [g.id] });
+          await turso.execute({ sql: `DELETE FROM chapters WHERE id = ?;`, args: [g.id] });
         }
+
+        const chStmts = detail.chapters.map((ch) => ({
+          sql: `INSERT OR REPLACE INTO chapters (id, comic_id, chapter_number, title, status, released_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?);`,
+          args: [`${comic.id}_ch${ch.chapterNumber}`, comic.id, ch.chapterNumber, ch.title, 'published', new Date().toISOString(), new Date().toISOString()],
+        }));
+        await turso.batch(chStmts, 'write');
+        const maxCh = Math.max(...detail.chapters.map((c) => c.chapterNumber));
+        await turso.execute({
+          sql: `UPDATE comics SET latest_chapter_number = ?, latest_chapter_date = ?, updated_at = ? WHERE id = ?;`,
+          args: [maxCh, new Date().toISOString(), new Date().toISOString(), comic.id],
+        });
       }
-
-      // 2. Simpan semua chapter resmi yang valid
-      const chaptersToInsert = detail.chapters.map((ch) => ({
-        comic_id: comic.id,
-        chapter_number: ch.chapterNumber,
-        title: ch.title,
-        status: 'published',
-        released_at: new Date().toISOString(),
-      }));
-
-      for (let i = 0; i < chaptersToInsert.length; i += 100) {
-        const batch = chaptersToInsert.slice(i, i + 100);
-        await supabase
-          .from('chapters')
-          .upsert(batch, { onConflict: 'comic_id,chapter_number' });
-      }
-
-      await supabase.from('comics').update({ updated_at: new Date().toISOString() }).eq('id', comic.id);
     }
 
     return {

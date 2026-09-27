@@ -1,4 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getTursoClient } from '@/lib/turso';
+import {
+  getTursoComicAdaptations,
+  insertTursoAdaptation,
+  updateTursoAdaptation,
+  deleteTursoAdaptation,
+} from '@/lib/queries/turso-comics';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { fetchFullComicRelations } from '@/lib/adaptation-service';
 
@@ -27,7 +34,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Case 2: Fetch existing adaptations from Supabase by comicId
+  // Case 2: Fetch existing adaptations by comicId
   if (!comicId) {
     return NextResponse.json(
       { success: false, error: 'Parameter comicId or autoFetchTitle is required' },
@@ -35,35 +42,38 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const supabase = createAdminClient();
-  if (!supabase) {
-    return NextResponse.json({ success: false, error: 'Database connection missing' }, { status: 500 });
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('comic_adaptations')
-      .select('*')
-      .eq('comic_id', comicId)
-      .order('start_chapter', { ascending: true });
-
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  // Prioritize Turso
+  if (getTursoClient()) {
+    try {
+      const data = await getTursoComicAdaptations(comicId);
+      return NextResponse.json({ success: true, data });
+    } catch (err: any) {
+      console.warn('[Admin Adaptations GET] Turso error:', err?.message);
     }
-
-    return NextResponse.json({ success: true, data });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err?.message || 'Server error' }, { status: 500 });
   }
+
+  const supabase = createAdminClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('comic_adaptations')
+        .select('*')
+        .eq('comic_id', comicId)
+        .order('start_chapter', { ascending: true });
+
+      if (!error && data) {
+        return NextResponse.json({ success: true, data });
+      }
+    } catch (err: any) {
+      console.warn('[Admin Adaptations GET] Supabase fallback error:', err?.message);
+    }
+  }
+
+  return NextResponse.json({ success: true, data: [] });
 }
 
 // POST: Insert a new adaptation range
 export async function POST(req: NextRequest) {
-  const supabase = createAdminClient();
-  if (!supabase) {
-    return NextResponse.json({ success: false, error: 'Database client missing' }, { status: 500 });
-  }
-
   try {
     const body = await req.json();
     const {
@@ -83,6 +93,26 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'comic_id, start_chapter, and end_chapter are required' },
         { status: 400 }
       );
+    }
+
+    if (getTursoClient()) {
+      const inserted = await insertTursoAdaptation({
+        comic_id,
+        start_chapter: Number(start_chapter),
+        end_chapter: Number(end_chapter),
+        anime_season: anime_season || null,
+        anime_episode_range: anime_episode_range || null,
+        novel_chapter_range: novel_chapter_range || null,
+        novel_volume: novel_volume || null,
+        arc_title: arc_title || null,
+        note: note || null,
+      });
+      return NextResponse.json({ success: true, data: inserted });
+    }
+
+    const supabase = createAdminClient();
+    if (!supabase) {
+      return NextResponse.json({ success: false, error: 'Database client missing' }, { status: 500 });
     }
 
     const { data, error } = await supabase
@@ -113,17 +143,22 @@ export async function POST(req: NextRequest) {
 
 // PUT: Update an existing adaptation range
 export async function PUT(req: NextRequest) {
-  const supabase = createAdminClient();
-  if (!supabase) {
-    return NextResponse.json({ success: false, error: 'Database client missing' }, { status: 500 });
-  }
-
   try {
     const body = await req.json();
     const { id, ...fields } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'id is required for update' }, { status: 400 });
+    }
+
+    if (getTursoClient()) {
+      const updated = await updateTursoAdaptation(id, fields);
+      return NextResponse.json({ success: true, data: updated });
+    }
+
+    const supabase = createAdminClient();
+    if (!supabase) {
+      return NextResponse.json({ success: false, error: 'Database client missing' }, { status: 500 });
     }
 
     const updatePayload: Record<string, any> = {
@@ -163,6 +198,11 @@ export async function DELETE(req: NextRequest) {
 
   if (!id) {
     return NextResponse.json({ success: false, error: 'id parameter is required' }, { status: 400 });
+  }
+
+  if (getTursoClient()) {
+    const ok = await deleteTursoAdaptation(id);
+    return NextResponse.json({ success: ok, message: 'Adaptation record deleted from Turso' });
   }
 
   const supabase = createAdminClient();

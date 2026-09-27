@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getTursoClient } from '@/lib/turso';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 // GET /api/admin/chapters/pages?chapterId=xxx
@@ -8,6 +9,26 @@ export async function GET(req: NextRequest) {
 
   if (!chapterId) {
     return NextResponse.json({ success: false, error: 'Parameter chapterId wajib diisi' }, { status: 400 });
+  }
+
+  const turso = getTursoClient();
+  if (turso) {
+    try {
+      const res = await turso.execute({
+        sql: `SELECT id, page_number, image_url, width, height FROM chapter_pages WHERE chapter_id = ? ORDER BY page_number ASC;`,
+        args: [chapterId],
+      });
+      const pages = res.rows.map((r: any) => ({
+        id: String(r.id),
+        page_number: Number(r.page_number),
+        image_url: String(r.image_url),
+        width: r.width ? Number(r.width) : null,
+        height: r.height ? Number(r.height) : null,
+      }));
+      return NextResponse.json({ success: true, data: pages });
+    } catch (err: any) {
+      console.warn('[Admin Pages GET] Turso error:', err?.message);
+    }
   }
 
   const supabase = createAdminClient();

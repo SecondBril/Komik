@@ -2,6 +2,7 @@ import { MatureComic, MatureFilterState, MatureGenre } from '../types';
 import { MOCK_MATURE_COMICS, MOCK_MATURE_GENRES } from '../mock-data-mature';
 import { createServerSupabaseClient } from '../supabase/server';
 import { createClient } from '../supabase/client';
+import { getTursoClient } from '../turso';
 
 function getSupabaseClient() {
   if (typeof window !== 'undefined') {
