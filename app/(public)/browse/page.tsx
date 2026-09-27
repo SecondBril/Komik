@@ -492,9 +492,9 @@ function BrowseContent() {
           </div>
 
           {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="aspect-[2/3] rounded-2xl bg-white/60 border-2 border-[#1A1A1A] animate-pulse" />
+            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-4">
+              {[...Array(9)].map((_, i) => (
+                <div key={i} className="aspect-[2/3] rounded-xl sm:rounded-2xl bg-white/60 border-[1.5px] sm:border-2 border-[#1A1A1A] animate-pulse" />
               ))}
             </div>
           ) : comics.length === 0 ? (
@@ -511,7 +511,7 @@ function BrowseContent() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
+              <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-4">
                 {comics.map((comic) => (
                   <ComicCard key={comic.id} comic={comic} />
                 ))}
