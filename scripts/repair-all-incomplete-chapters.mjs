@@ -29,9 +29,9 @@ if (!supabaseUrl || !supabaseKey) {
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
-// Turso client
+// Turso client (Primary Database)
 let turso = null;
 const tursoUrl = process.env.TURSO_DATABASE_URL;
 const tursoToken = process.env.TURSO_AUTH_TOKEN;
@@ -40,8 +40,20 @@ if (tursoUrl && tursoToken) {
     turso = createTursoClient({ url: tursoUrl, authToken: tursoToken });
     console.log('✅ Turso Database terhubung!');
   } catch (tErr) {
-    console.warn('⚠️ Gagal inisialisasi Turso:', tErr.message);
+    console.error('❌ Gagal inisialisasi Turso:', tErr.message);
+    process.exit(1);
   }
+} else {
+  console.error('\n======================================================');
+  console.error('❌ ERROR: TURSO_DATABASE_URL atau TURSO_AUTH_TOKEN BELUM DISET!');
+  console.error('======================================================');
+  console.error('Semua data komik dan chapter sekarang disimpan di database Turso.');
+  console.error('Jika menjalankan di GitHub Actions, Anda HARUS menambahkan Secrets:');
+  console.error('  1. Buka Repository GitHub -> Settings -> Secrets and variables -> Actions');
+  console.error('  2. Tambahkan Secret: TURSO_DATABASE_URL');
+  console.error('  3. Tambahkan Secret: TURSO_AUTH_TOKEN');
+  console.error('======================================================\n');
+  process.exit(1);
 }
 
 function getChromeExecutablePath() {
