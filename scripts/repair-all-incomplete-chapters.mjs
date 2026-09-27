@@ -389,16 +389,16 @@ async function main() {
         }
       }
 
-      // 3. Upsert ke Supabase
-      const CHUNK_SIZE = 100;
-      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-        const batch = rows.slice(i, i + CHUNK_SIZE);
-        const { error: upsertErr } = await supabase
-          .from('chapters')
-          .upsert(batch, { onConflict: 'comic_id,chapter_number' });
-
-        if (upsertErr) {
-          console.error(`   ❌ Batch upsert Supabase error [${i}..${i + batch.length}]:`, upsertErr.message);
+      // 3. Upsert ke Supabase (hanya jika Turso tidak aktif, agar disk Supabase tidak penuh)
+      if (!turso) {
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+          const batch = rows.slice(i, i + CHUNK_SIZE);
+          try {
+            await supabase
+              .from('chapters')
+              .upsert(batch, { onConflict: 'comic_id,chapter_number' });
+          } catch {}
         }
       }
 

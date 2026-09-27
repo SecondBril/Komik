@@ -215,27 +215,13 @@ export async function GET(req: NextRequest) {
       if (livePages && livePages.length > 0) {
         pages = livePages;
 
-        // Auto-cache ke Turso (prioritas utama)
+        // Auto-cache ke Turso (database penyimpanan gambar utama)
         if (turso && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
           try {
             await saveTursoChapterPages(currentChapter.id, livePages);
             console.log(`[Reader API] Auto-cached ${livePages.length} pages to Turso for chapter ${currentChapter.id}`);
           } catch (tursoSaveErr: any) {
             console.warn('[Reader API] Failed to auto-cache pages to Turso:', tursoSaveErr?.message);
-          }
-        }
-
-        // Auto-cache juga ke Supabase jika tersedia
-        if (supabase && currentChapter?.id && !String(currentChapter.id).startsWith('mock-')) {
-          try {
-            const rowsToInsert = livePages.map((p, idx) => ({
-              chapter_id: currentChapter.id,
-              page_number: p.page_number || idx + 1,
-              image_url: p.image_url,
-            }));
-            await supabase.from('chapter_pages').upsert(rowsToInsert, { onConflict: 'chapter_id,page_number' });
-          } catch (cacheErr: any) {
-            console.warn('[Reader API] Failed to auto-cache pages to Supabase:', cacheErr?.message);
           }
         }
       }

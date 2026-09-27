@@ -286,15 +286,16 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
         }
       }
 
-      // Upsert ke Supabase
-      const CHUNK_SIZE = 100;
-      for (let i = 0; i < newRows.length; i += CHUNK_SIZE) {
-        const batch = newRows.slice(i, i + CHUNK_SIZE);
-        const { error: insErr } = await supabase
-          .from('chapters')
-          .upsert(batch, { onConflict: 'comic_id,chapter_number' });
-        if (insErr) {
-          console.warn(`   ⚠️ Gagal upsert chapter baru ke Supabase:`, insErr.message);
+      // Upsert ke Supabase (hanya jika Turso tidak aktif, agar disk Supabase tidak penuh)
+      if (!turso) {
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < newRows.length; i += CHUNK_SIZE) {
+          const batch = newRows.slice(i, i + CHUNK_SIZE);
+          try {
+            await supabase
+              .from('chapters')
+              .upsert(batch, { onConflict: 'comic_id,chapter_number' });
+          } catch {}
         }
       }
 
@@ -319,14 +320,39 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
     }
   }
 
-  // 3. Ambil seluruh chapter di Supabase beserta halaman gambarnya
-  const { data: dbChapters, error: chErr } = await supabase
-    .from('chapters')
-    .select('id, chapter_number, title, chapter_pages(id, image_url)')
-    .eq('comic_id', comic.id)
-    .order('chapter_number', { ascending: false });
+  // 3. Ambil seluruh chapter terdaftar (prioritas dari Turso, fallback ke Supabase)
+  let dbChapters = [];
+  if (turso) {
+    try {
+      const tChs = await turso.execute({
+        sql: `SELECT id, chapter_number, title FROM chapters WHERE comic_id = ? ORDER BY chapter_number DESC;`,
+        args: [comic.id],
+      });
+      if (tChs.rows.length > 0) {
+        dbChapters = tChs.rows.map((r) => ({
+          id: String(r.id),
+          chapter_number: Number(r.chapter_number),
+          title: String(r.title || `Chapter ${r.chapter_number}`),
+        }));
+      }
+    } catch (tErr) {
+      console.warn('   ⚠️ Gagal membaca chapter dari Turso:', tErr.message);
+    }
+  }
 
-  if (chErr || !dbChapters || dbChapters.length === 0) {
+  if (dbChapters.length === 0) {
+    const { data: sChapters, error: chErr } = await supabase
+      .from('chapters')
+      .select('id, chapter_number, title')
+      .eq('comic_id', comic.id)
+      .order('chapter_number', { ascending: false });
+
+    if (sChapters && sChapters.length > 0) {
+      dbChapters = sChapters;
+    }
+  }
+
+  if (dbChapters.length === 0) {
     console.log(`   ⚠️ Tidak ada chapter terdaftar di database untuk komik ini.`);
     return 0;
   }
@@ -394,63 +420,13 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
         }
       }
     } catch (tErr) {
-      console.warn('⚠️ Gagal membaca halaman chapter dari Turso:', tErr.message);
+      console.warn('   ⚠️ Gagal membaca halaman chapter dari Turso:', tErr.message);
     }
   }
 
-  // 4. Sinkronisasi silang antara Turso dan Supabase tanpa scraping (super cepat!)
-  let crossSyncedCount = 0;
-  for (const ch of dbChapters) {
-    const sPages = ch.chapter_pages || [];
-    const tPages = tursoPagesMap.get(Number(ch.chapter_number)) || [];
-
-    // Jika Supabase punya gambar tapi Turso belum -> Simpan langsung ke Turso
-    if (sPages.length > 0 && tPages.length === 0 && turso) {
-      try {
-        const imageUrls = sPages.map((p) => p.image_url);
-        const tStmts = imageUrls.map((imgUrl, idx) => ({
-          sql: `
-            INSERT INTO chapter_pages (id, chapter_id, page_number, image_url)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(chapter_id, page_number) DO UPDATE SET image_url = excluded.image_url;
-          `,
-          args: [`${ch.id}_p${idx + 1}`, ch.id, idx + 1, imgUrl],
-        }));
-        tStmts.push({
-          sql: `UPDATE chapters SET pages = ?, status = 'published' WHERE id = ?;`,
-          args: [JSON.stringify(imageUrls), ch.id],
-        });
-        await turso.batch(tStmts, 'write');
-        tursoPagesMap.set(Number(ch.chapter_number), imageUrls);
-        crossSyncedCount++;
-      } catch {}
-    }
-
-    // Jika Turso punya gambar tapi Supabase belum -> Simpan langsung ke Supabase
-    if (tPages.length > 0 && sPages.length === 0) {
-      try {
-        const sRows = tPages.map((imgUrl, idx) => ({
-          chapter_id: ch.id,
-          page_number: idx + 1,
-          image_url: imgUrl,
-        }));
-        await supabase.from('chapter_pages').upsert(sRows, { onConflict: 'chapter_id,page_number' });
-        await supabase.from('chapters').update({ status: 'published' }).eq('id', ch.id);
-        ch.chapter_pages = sRows;
-        crossSyncedCount++;
-      } catch {}
-    }
-  }
-
-  if (crossSyncedCount > 0) {
-    console.log(`   🔄 Auto-sync DB: ${crossSyncedCount} chapter berhasil disinkronkan antar Turso & Supabase!`);
-  }
-
-  // 5. Filter chapter yang BENAR-BENAR belum punya gambar sama sekali
+  // 4. Filter chapter yang BENAR-BENAR belum punya gambar sama sekali di Turso
   let missingChapters = dbChapters.filter((ch) => {
-    const sEmpty = !ch.chapter_pages || ch.chapter_pages.length === 0;
-    const tEmpty = !tursoPagesMap.has(Number(ch.chapter_number));
-    return sEmpty && tEmpty;
+    return !tursoPagesMap.has(Number(ch.chapter_number));
   });
 
   if (missingChapters.length === 0) {
@@ -540,7 +516,9 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
     }
 
     if (capturedForChapter.length > 0) {
-      // 1. Simpan ke Turso
+      let savedToTurso = false;
+
+      // 1. Simpan ke Turso (Database Utama Penyimpanan Gambar)
       if (turso) {
         try {
           const tStmts = capturedForChapter.map((imgUrl, idx) => ({
@@ -557,27 +535,38 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
           });
           await turso.batch(tStmts, 'write');
           console.log(`      ✅ Sukses! ${capturedForChapter.length} halaman tersimpan di Turso.`);
+          savedToTurso = true;
+          restoredChaptersCount++;
         } catch (tErr) {
           console.warn(`      ⚠️ Gagal simpan ke Turso:`, tErr.message);
         }
       }
 
-      // 2. Simpan ke Supabase
-      const rows = capturedForChapter.map((imgUrl, idx) => ({
-        chapter_id: ch.id,
-        page_number: idx + 1,
-        image_url: imgUrl,
-      }));
-
-      const { error: insErr } = await supabase
-        .from('chapter_pages')
-        .upsert(rows, { onConflict: 'chapter_id,page_number' });
-
-      if (insErr) {
-        console.warn(`      ⚠️ Gagal simpan ke Supabase untuk Ch ${ch.chapter_number}:`, insErr.message);
+      // 2. Jika Turso aktif, JANGAN simpan jutaan gambar ke Supabase chapter_pages
+      // (karena disk Supabase Free Tier memiliki batas 500MB -> "No space left on device").
+      // Cukup update status chapter di Supabase tanpa menambah baris tabel.
+      if (savedToTurso) {
+        try {
+          await supabase.from('chapters').update({ status: 'published', retry_count: 0 }).eq('id', ch.id);
+        } catch {}
       } else {
-        await supabase.from('chapters').update({ status: 'published', retry_count: 0 }).eq('id', ch.id);
-        restoredChaptersCount++;
+        // Fallback hanya jika Turso sama sekali tidak aktif
+        const rows = capturedForChapter.map((imgUrl, idx) => ({
+          chapter_id: ch.id,
+          page_number: idx + 1,
+          image_url: imgUrl,
+        }));
+
+        const { error: insErr } = await supabase
+          .from('chapter_pages')
+          .upsert(rows, { onConflict: 'chapter_id,page_number' });
+
+        if (insErr) {
+          console.warn(`      ⚠️ Gagal simpan ke Supabase untuk Ch ${ch.chapter_number}:`, insErr.message);
+        } else {
+          await supabase.from('chapters').update({ status: 'published', retry_count: 0 }).eq('id', ch.id);
+          restoredChaptersCount++;
+        }
       }
     } else {
       console.warn(`      ⚠️ Tidak ada gambar ditemukan untuk Ch ${ch.chapter_number}.`);
@@ -588,7 +577,7 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
   }
 
   await chPage.close().catch(() => {});
-  return restoredChaptersCount + crossSyncedCount;
+  return restoredChaptersCount;
 }
 
 async function main() {
@@ -612,11 +601,33 @@ async function main() {
 
   try {
     if (targetSlug) {
-      const { data: comic } = await supabase
-        .from('comics')
-        .select('id, title, slug')
-        .eq('slug', targetSlug)
-        .maybeSingle();
+      let comic = null;
+      if (turso) {
+        try {
+          const tRes = await turso.execute({
+            sql: `SELECT id, title, slug FROM comics WHERE slug = ? LIMIT 1;`,
+            args: [targetSlug],
+          });
+          if (tRes.rows.length > 0) {
+            comic = {
+              id: String(tRes.rows[0].id),
+              title: String(tRes.rows[0].title),
+              slug: String(tRes.rows[0].slug),
+            };
+          }
+        } catch {}
+      }
+
+      if (!comic) {
+        try {
+          const { data: sComic } = await supabase
+            .from('comics')
+            .select('id, title, slug')
+            .eq('slug', targetSlug)
+            .maybeSingle();
+          comic = sComic;
+        } catch {}
+      }
 
       if (!comic) {
         console.error(`❌ Komik "${targetSlug}" tidak ditemukan di database.`);
