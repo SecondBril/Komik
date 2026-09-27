@@ -331,10 +331,11 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
     return 0;
   }
 
-  // Cek status gambar di Turso
+  // Cek status gambar di Turso (dari kolom pages dan tabel chapter_pages)
   const tursoPagesMap = new Map();
   if (turso) {
     try {
+      // 1. Cek dari kolom JSON pages
       const tRes = await turso.execute({
         sql: `SELECT id, chapter_number, pages FROM chapters WHERE comic_id = ? AND pages IS NOT NULL AND pages != '[]' AND pages != '';`,
         args: [comic.id],
@@ -347,7 +348,54 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
           }
         } catch {}
       }
-    } catch {}
+
+      // 2. Cek juga dari tabel relasional chapter_pages (untuk data lama yang belum ter-cache di kolom JSON)
+      const cpRes = await turso.execute({
+        sql: `
+          SELECT ch.id as chapter_id, ch.chapter_number, cp.image_url
+          FROM chapters ch
+          JOIN chapter_pages cp ON cp.chapter_id = ch.id
+          WHERE ch.comic_id = ?
+          ORDER BY ch.chapter_number ASC, cp.page_number ASC;
+        `,
+        args: [comic.id],
+      });
+
+      const cpGrouped = new Map();
+      const chIdMap = new Map();
+      for (const row of cpRes.rows) {
+        const cNum = Number(row.chapter_number);
+        if (!cpGrouped.has(cNum)) {
+          cpGrouped.set(cNum, []);
+          chIdMap.set(cNum, String(row.chapter_id));
+        }
+        cpGrouped.get(cNum).push(String(row.image_url));
+      }
+
+      // Masukkan ke tursoPagesMap dan sekaligus isi cache chapters.pages jika belum ada
+      const cacheUpdates = [];
+      for (const [cNum, imgs] of cpGrouped.entries()) {
+        if (!tursoPagesMap.has(cNum) && imgs.length > 0) {
+          tursoPagesMap.set(cNum, imgs);
+          const chId = chIdMap.get(cNum);
+          if (chId) {
+            cacheUpdates.push({
+              sql: `UPDATE chapters SET pages = ? WHERE id = ?;`,
+              args: [JSON.stringify(imgs), chId],
+            });
+          }
+        }
+      }
+
+      if (cacheUpdates.length > 0) {
+        // Jalankan background batch update cache JSON di Turso
+        for (let i = 0; i < cacheUpdates.length; i += 100) {
+          await turso.batch(cacheUpdates.slice(i, i + 100), 'write').catch(() => {});
+        }
+      }
+    } catch (tErr) {
+      console.warn('⚠️ Gagal membaca halaman chapter dari Turso:', tErr.message);
+    }
   }
 
   // 4. Sinkronisasi silang antara Turso dan Supabase tanpa scraping (super cepat!)
@@ -584,13 +632,54 @@ async function main() {
       }
       console.log(`======================================================\n`);
 
-      // Ambil semua komik di database
-      const { data: allComics, error: cErr } = await supabase
-        .from('comics')
-        .select('id, title, slug')
-        .order('id', { ascending: true });
+      // Ambil SEMUA komik di database (tidak terpotong limit 1.000 PostgREST) dan prioritaskan komik populer
+      console.log(`🔍 Membaca seluruh katalog komik dari database...`);
+      let allComics = [];
 
-      if (cErr || !allComics || allComics.length === 0) {
+      if (turso) {
+        try {
+          const tComicsRes = await turso.execute(`
+            SELECT c.id, c.title, c.slug, c.rating, count(ch.id) as total_chs
+            FROM comics c
+            LEFT JOIN chapters ch ON ch.comic_id = c.id
+            GROUP BY c.id
+            ORDER BY c.rating DESC, total_chs DESC;
+          `);
+          if (tComicsRes.rows.length > 0) {
+            allComics = tComicsRes.rows.map(r => ({
+              id: String(r.id),
+              title: String(r.title),
+              slug: String(r.slug),
+              rating: Number(r.rating || 0),
+              total_chs: Number(r.total_chs || 0),
+            }));
+            console.log(`✅ Berhasil membaca ${allComics.length} komik dari Turso (diurutkan berdasarkan popularitas/rating).`);
+          }
+        } catch (tErr) {
+          console.warn(`⚠️ Gagal query Turso untuk allComics:`, tErr.message);
+        }
+      }
+
+      if (allComics.length === 0) {
+        // Fallback Supabase paginated query (tidak terpotong limit 1000)
+        let from = 0;
+        const PAGE_SIZE = 1000;
+        while (true) {
+          const { data: batch, error: bErr } = await supabase
+            .from('comics')
+            .select('id, title, slug, rating')
+            .order('rating', { ascending: false })
+            .range(from, from + PAGE_SIZE - 1);
+
+          if (bErr || !batch || batch.length === 0) break;
+          allComics.push(...batch);
+          if (batch.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
+        }
+        console.log(`✅ Berhasil membaca ${allComics.length} komik dari Supabase dengan paginasi penuh.`);
+      }
+
+      if (allComics.length === 0) {
         console.log('Tidak ada komik ditemukan di database.');
         return;
       }

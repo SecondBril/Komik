@@ -197,15 +197,48 @@ async function fetchComicChapters(browser, slug) {
 }
 
 async function main() {
-  console.log('🔍 Memeriksa daftar komik di Supabase untuk mendeteksi chapter tidak lengkap...');
+  console.log('🔍 Membaca daftar komik dari database untuk mendeteksi chapter tidak lengkap...');
 
-  const { data: comics, error } = await supabase
-    .from('comics')
-    .select('id, slug, title')
-    .order('created_at', { ascending: false });
+  let comics = [];
+  if (turso) {
+    try {
+      const tComicsRes = await turso.execute(`
+        SELECT id, slug, title, rating FROM comics ORDER BY rating DESC, created_at DESC;
+      `);
+      if (tComicsRes.rows.length > 0) {
+        comics = tComicsRes.rows.map(r => ({
+          id: String(r.id),
+          slug: String(r.slug),
+          title: String(r.title),
+        }));
+        console.log(`✅ Berhasil membaca ${comics.length} komik dari Turso.`);
+      }
+    } catch (tErr) {
+      console.warn('⚠️ Gagal query Turso untuk comics:', tErr.message);
+    }
+  }
 
-  if (error || !comics) {
-    console.error('❌ Gagal membaca tabel comics:', error?.message);
+  if (comics.length === 0) {
+    // Fallback Supabase paginated query
+    let from = 0;
+    const PAGE_SIZE = 1000;
+    while (true) {
+      const { data: batch, error: bErr } = await supabase
+        .from('comics')
+        .select('id, slug, title')
+        .order('rating', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (bErr || !batch || batch.length === 0) break;
+      comics.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+    console.log(`✅ Berhasil membaca ${comics.length} komik dari Supabase dengan paginasi penuh.`);
+  }
+
+  if (comics.length === 0) {
+    console.error('❌ Tidak ada komik yang ditemukan di database.');
     process.exit(1);
   }
 

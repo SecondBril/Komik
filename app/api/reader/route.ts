@@ -199,6 +199,9 @@ export async function GET(req: NextRequest) {
 
       if (dbPages && dbPages.length > 0 && !dbPagesErr) {
         pages = dbPages;
+        if (turso && currentChapter?.id) {
+          saveTursoChapterPages(currentChapter.id, dbPages).catch(() => {});
+        }
       }
     } catch (err: any) {
       console.warn('[Reader API] Error fetching chapter_pages from DB:', err?.message);

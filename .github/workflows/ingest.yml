@@ -239,5 +239,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-          REPAIR_LIMIT: "25"
-          MAX_CHAPTERS_PER_COMIC: "10"
+          REPAIR_LIMIT: ${{ inputs.mode == 'repair_single' && '1' || '30' }}
+          MAX_CHAPTERS_PER_COMIC: ${{ inputs.mode == 'repair_single' && (inputs.max_chapters_per_comic || '0') || (inputs.max_chapters_per_comic != '' && inputs.max_chapters_per_comic != '0' && inputs.max_chapters_per_comic || '15') }}
