@@ -1,10 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
-import * as cheerio from 'cheerio';
+import { createClient as createTursoClient } from '@libsql/client';
 import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 import { execSync } from 'child_process';
 
-// Load .env.local if needed
+// 1. Load .env.local
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY && fs.existsSync('.env.local')) {
   try {
     const envLines = fs.readFileSync('.env.local', 'utf8').split('\n');
@@ -30,6 +30,19 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Turso client
+let turso = null;
+const tursoUrl = process.env.TURSO_DATABASE_URL;
+const tursoToken = process.env.TURSO_AUTH_TOKEN;
+if (tursoUrl && tursoToken) {
+  try {
+    turso = createTursoClient({ url: tursoUrl, authToken: tursoToken });
+    console.log('✅ Turso Database terhubung!');
+  } catch (tErr) {
+    console.warn('⚠️ Gagal inisialisasi Turso:', tErr.message);
+  }
+}
 
 function getChromeExecutablePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
@@ -60,46 +73,101 @@ function getChromeExecutablePath() {
   return null;
 }
 
+async function setupPageInterception(page) {
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const rt = req.resourceType();
+    const url = req.url().toLowerCase();
+
+    if (
+      ['font', 'media'].includes(rt) ||
+      url.includes('google') ||
+      url.includes('histats') ||
+      url.includes('/0ads/') ||
+      url.includes('cloudflareinsights') ||
+      url.includes('doubleclick') ||
+      url.includes('facebook') ||
+      url.includes('adnxs') ||
+      url.includes('syndication') ||
+      url.includes('analytics')
+    ) {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
+}
+
+/**
+ * Mengambil daftar chapter resmi dari Westmanga via API Mantweh (prioritas utama) atau fallback DOM
+ */
 async function fetchComicChapters(browser, slug) {
   const page = await browser.newPage();
+  await setupPageInterception(page);
+
   try {
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-    await page.setViewport({ width: 1280, height: 800 });
-
-    const url = `https://v1.westmanga.my/comic/${slug}/`;
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 35000 });
-
     const cleanSlug = slug.replace(/\/+$/, '').toLowerCase();
-    try {
-      await page.waitForFunction(
-        (targetSlug) => {
-          const links = Array.from(document.querySelectorAll('a[href*="/view/"]'));
-          return links.some((a) => a.href.toLowerCase().includes(targetSlug));
-        },
-        { timeout: 8000 },
-        cleanSlug
-      );
-    } catch {
-      await new Promise((r) => setTimeout(r, 2000));
+    const url = `https://v1.westmanga.my/comic/${cleanSlug}/`;
+
+    let officialChapters = null;
+
+    const apiPromise = new Promise((resolve) => {
+      const handler = async (res) => {
+        const u = res.url();
+        if (u.includes(`data.mantweh.online/api/comic/${cleanSlug}`) && res.status() === 200) {
+          try {
+            const json = await res.json();
+            if (json.data?.chapters && Array.isArray(json.data.chapters)) {
+              officialChapters = json.data.chapters;
+              page.off('response', handler);
+              resolve(officialChapters);
+            }
+          } catch {}
+        }
+      };
+      page.on('response', handler);
+      setTimeout(() => {
+        page.off('response', handler);
+        resolve(null);
+      }, 15000);
+    });
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await apiPromise;
+
+    if (officialChapters && officialChapters.length > 0) {
+      const seen = new Set();
+      const result = [];
+      for (const ch of officialChapters) {
+        const num = parseFloat(String(ch.number).replace('-', '.'));
+        if (!isNaN(num) && num > 0 && !seen.has(num)) {
+          seen.add(num);
+          result.push({
+            chapter_number: num,
+            title: ch.title || `Chapter ${ch.number}`,
+            slug: ch.slug,
+          });
+        }
+      }
+      return result.sort((a, b) => b.chapter_number - a.chapter_number);
     }
 
-    const chapters = await page.evaluate((targetSlug) => {
-      const cleanSlug = targetSlug.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const allLinks = Array.from(document.querySelectorAll('a[href*="/view/"]'));
+    // Fallback: DOM parsing
+    try {
+      await page.waitForFunction(
+        () => Array.from(document.querySelectorAll('a')).some((a) => (a.href || '').includes('/view/')),
+        { timeout: 8000 }
+      );
+    } catch {}
 
+    const chapters = await page.evaluate((targetSlug) => {
+      const allLinks = Array.from(document.querySelectorAll('a[href*="/view/"]'));
       const seen = new Set();
       const result = [];
 
       allLinks.forEach((a) => {
         const href = a.href || '';
         const text = a.textContent?.trim() || '';
-
-        const cleanHref = href.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (!cleanHref.includes(cleanSlug) && !href.toLowerCase().includes(targetSlug.toLowerCase())) {
-          return;
-        }
 
         const match =
           text.match(/(?:chapter|ch\.?)\s*(\d+(?:[\.-]\d+)?)/i) ||
@@ -117,14 +185,14 @@ async function fetchComicChapters(browser, slug) {
       });
 
       return result.sort((a, b) => b.chapter_number - a.chapter_number);
-    }, slug);
+    }, cleanSlug);
 
     return chapters;
   } catch (err) {
     console.error(`     [Repair] Gagal fetch detail chapters untuk ${slug}:`, err.message);
     return [];
   } finally {
-    await page.close();
+    await page.close().catch(() => {});
   }
 }
 
@@ -254,21 +322,41 @@ async function main() {
         const ghostChs = dbChs.filter((ch) => !validNums.has(ch.chapter_number));
         if (ghostChs.length > 0) {
           const ghostIds = ghostChs.map((ch) => ch.id);
+          // Hapus dari Supabase
           await supabase.from('chapter_pages').delete().in('chapter_id', ghostIds);
           await supabase.from('chapters').delete().in('id', ghostIds);
+
+          // Hapus dari Turso jika aktif
+          if (turso) {
+            try {
+              const ph = ghostIds.map(() => '?').join(',');
+              await turso.execute({ sql: `DELETE FROM chapter_pages WHERE chapter_id IN (${ph});`, args: ghostIds });
+              await turso.execute({ sql: `DELETE FROM chapters WHERE id IN (${ph});`, args: ghostIds });
+            } catch (tDelErr) {
+              console.warn(`   ⚠️ Gagal menghapus ghost chapter di Turso:`, tDelErr.message);
+            }
+          }
           console.log(`   🗑️ Dihapus ${ghostIds.length} chapter fiktif/hantu (nomor: ${ghostChs.map((g) => g.chapter_number).join(', ')})`);
         }
       }
 
-      // 2. Upsert seluruh chapter resmi
-      const rows = chapters.map((ch) => ({
-        comic_id: c.comic.id,
-        chapter_number: ch.chapter_number,
-        title: ch.title,
-        status: 'published',
-        released_at: new Date().toISOString(),
-      }));
+      // 2. Deduplikasi baris chapter sebelum upsert
+      const seenNums = new Set();
+      const rows = [];
+      for (const ch of chapters) {
+        if (!seenNums.has(ch.chapter_number)) {
+          seenNums.add(ch.chapter_number);
+          rows.push({
+            comic_id: c.comic.id,
+            chapter_number: ch.chapter_number,
+            title: ch.title,
+            status: 'published',
+            released_at: new Date().toISOString(),
+          });
+        }
+      }
 
+      // 3. Upsert ke Supabase
       const CHUNK_SIZE = 100;
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
         const batch = rows.slice(i, i + CHUNK_SIZE);
@@ -277,7 +365,26 @@ async function main() {
           .upsert(batch, { onConflict: 'comic_id,chapter_number' });
 
         if (upsertErr) {
-          console.error(`   ❌ Batch upsert error [${i}..${i + batch.length}]:`, upsertErr.message);
+          console.error(`   ❌ Batch upsert Supabase error [${i}..${i + batch.length}]:`, upsertErr.message);
+        }
+      }
+
+      // 4. Upsert ke Turso jika aktif
+      if (turso) {
+        try {
+          const tStmts = rows.map((r) => ({
+            sql: `
+              INSERT INTO chapters (id, comic_id, chapter_number, title, status, released_at)
+              VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(comic_id, chapter_number) DO UPDATE SET title = excluded.title;
+            `,
+            args: [`${r.comic_id}_ch${r.chapter_number}`, r.comic_id, r.chapter_number, r.title, r.status, r.released_at],
+          }));
+          for (let i = 0; i < tStmts.length; i += CHUNK_SIZE) {
+            await turso.batch(tStmts.slice(i, i + CHUNK_SIZE), 'write');
+          }
+        } catch (tErr) {
+          console.warn(`   ⚠️ Gagal upsert chapter ke Turso:`, tErr.message);
         }
       }
 

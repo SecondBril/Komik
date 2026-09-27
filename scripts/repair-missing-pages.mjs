@@ -177,117 +177,249 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
   console.log(`📖 Memproses Komik: "${comic.title}" (${comic.slug})`);
   console.log(`======================================================`);
 
-  // 1. Ambil semua chapter di DB beserta status gambarnya via nested select efisien
+  // 1. Kunjungi halaman komik di Westmanga dan tangkap API resmi (Mantweh) untuk mendapatkan 100% chapter akurat
+  const mapPage = await browser.newPage();
+  await setupPageInterception(mapPage);
+
+  console.log(`   ⏳ Mengambil metadata & daftar chapter resmi dari Westmanga API...`);
+  const comicUrl = `https://v1.westmanga.my/comic/${comic.slug}`;
+
+  let chapterUrlMap = {};
+  let chapterSlugMap = {};
+  let officialChapters = [];
+
+  const comicApiPromise = new Promise((resolve) => {
+    const handler = async (res) => {
+      const u = res.url();
+      if (u.includes('data.mantweh.online/api/comic/' + comic.slug) && res.status() === 200) {
+        try {
+          const json = await res.json();
+          if (json.data?.chapters && Array.isArray(json.data.chapters)) {
+            officialChapters = json.data.chapters;
+            mapPage.off('response', handler);
+            resolve(officialChapters);
+          }
+        } catch {}
+      }
+    };
+    mapPage.on('response', handler);
+    setTimeout(() => {
+      mapPage.off('response', handler);
+      resolve(null);
+    }, 15000);
+  });
+
+  try {
+    await mapPage.goto(comicUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await comicApiPromise;
+
+    if (officialChapters.length > 0) {
+      console.log(`   ✓ Ditemukan ${officialChapters.length} chapter resmi dari Westmanga API.`);
+      for (const ch of officialChapters) {
+        const num = parseFloat(String(ch.number).replace('-', '.'));
+        if (!isNaN(num)) {
+          chapterUrlMap[num] = `https://v1.westmanga.my/view/${ch.slug}`;
+          chapterUrlMap[String(num)] = `https://v1.westmanga.my/view/${ch.slug}`;
+          chapterSlugMap[num] = ch.slug;
+          chapterSlugMap[String(num)] = ch.slug;
+        }
+      }
+    } else {
+      // Fallback ke DOM parsing jika API tidak tertangkap
+      console.log(`   ⏳ Fallback: Mencari link chapter via DOM...`);
+      await mapPage.waitForFunction(
+        () => Array.from(document.querySelectorAll('a')).some((a) => (a.href || '').includes('/view/')),
+        { timeout: 10000 }
+      ).catch(() => {});
+
+      const extractedLinks = await mapPage.evaluate(() => {
+        const allA = Array.from(document.querySelectorAll('a[href*="/view/"]'));
+        return allA.map((a) => ({ href: a.href || '', text: a.innerText.trim() }));
+      });
+
+      for (const item of extractedLinks) {
+        const num = extractChapterNumber(item.text, item.href);
+        if (num !== null && !isNaN(num)) {
+          chapterUrlMap[num] = item.href;
+          chapterUrlMap[String(num)] = item.href;
+          chapterUrlMap[num.toFixed(1)] = item.href;
+        }
+      }
+      console.log(`   ✓ Ditemukan ${Object.keys(chapterUrlMap).length} tautan chapter dari DOM.`);
+    }
+  } catch (err) {
+    console.warn(`   ⚠️ Peringatan saat memetakan daftar chapter:`, err.message);
+  } finally {
+    await mapPage.close().catch(() => {});
+  }
+
+  // 2. Sinkronkan chapter resmi yang belum ada di database (misal jika ada chapter baru/terlewat)
+  if (officialChapters.length > 0) {
+    const { data: existingChs } = await supabase
+      .from('chapters')
+      .select('chapter_number')
+      .eq('comic_id', comic.id);
+
+    const existingNumSet = new Set((existingChs || []).map((c) => Number(c.chapter_number)));
+    const missingOfficialChs = officialChapters.filter((ch) => {
+      const num = parseFloat(String(ch.number).replace('-', '.'));
+      return !isNaN(num) && !existingNumSet.has(num);
+    });
+
+    if (missingOfficialChs.length > 0) {
+      console.log(`   ⚡ Menambahkan ${missingOfficialChs.length} chapter resmi yang belum tercatat di database...`);
+      
+      // Deduplikasi baris chapter berdasarkan chapter_number untuk mencegah error ON CONFLICT PostgreSQL
+      const seenNum = new Set();
+      const newRows = [];
+      for (const ch of missingOfficialChs) {
+        const num = parseFloat(String(ch.number).replace('-', '.'));
+        if (!isNaN(num) && !seenNum.has(num)) {
+          seenNum.add(num);
+          newRows.push({
+            comic_id: comic.id,
+            chapter_number: num,
+            title: ch.title || `Chapter ${ch.number}`,
+            status: 'published',
+            released_at: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Upsert ke Supabase
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < newRows.length; i += CHUNK_SIZE) {
+        const batch = newRows.slice(i, i + CHUNK_SIZE);
+        const { error: insErr } = await supabase
+          .from('chapters')
+          .upsert(batch, { onConflict: 'comic_id,chapter_number' });
+        if (insErr) {
+          console.warn(`   ⚠️ Gagal upsert chapter baru ke Supabase:`, insErr.message);
+        }
+      }
+
+      // Upsert ke Turso jika aktif
+      if (turso) {
+        try {
+          const tStmts = newRows.map((r) => ({
+            sql: `
+              INSERT INTO chapters (id, comic_id, chapter_number, title, status, released_at)
+              VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(comic_id, chapter_number) DO UPDATE SET title = excluded.title;
+            `,
+            args: [`${r.comic_id}_ch${r.chapter_number}`, r.comic_id, r.chapter_number, r.title, r.status, r.released_at],
+          }));
+          for (let i = 0; i < tStmts.length; i += CHUNK_SIZE) {
+            await turso.batch(tStmts.slice(i, i + CHUNK_SIZE), 'write');
+          }
+        } catch (tErr) {
+          console.warn(`   ⚠️ Gagal upsert chapter baru ke Turso:`, tErr.message);
+        }
+      }
+    }
+  }
+
+  // 3. Ambil seluruh chapter di Supabase beserta halaman gambarnya
   const { data: dbChapters, error: chErr } = await supabase
     .from('chapters')
-    .select('id, chapter_number, title, chapter_pages(id)')
+    .select('id, chapter_number, title, chapter_pages(id, image_url)')
     .eq('comic_id', comic.id)
-    .order('chapter_number', { ascending: true });
+    .order('chapter_number', { ascending: false });
 
   if (chErr || !dbChapters || dbChapters.length === 0) {
     console.log(`   ⚠️ Tidak ada chapter terdaftar di database untuk komik ini.`);
     return 0;
   }
 
-  let missingChapters = dbChapters.filter(
-    (ch) => !ch.chapter_pages || ch.chapter_pages.length === 0
-  );
+  // Cek status gambar di Turso
+  const tursoPagesMap = new Map();
+  if (turso) {
+    try {
+      const tRes = await turso.execute({
+        sql: `SELECT id, chapter_number, pages FROM chapters WHERE comic_id = ? AND pages IS NOT NULL AND pages != '[]' AND pages != '';`,
+        args: [comic.id],
+      });
+      for (const row of tRes.rows) {
+        try {
+          const p = JSON.parse(String(row.pages));
+          if (Array.isArray(p) && p.length > 0) {
+            tursoPagesMap.set(Number(row.chapter_number), p);
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // 4. Sinkronisasi silang antara Turso dan Supabase tanpa scraping (super cepat!)
+  let crossSyncedCount = 0;
+  for (const ch of dbChapters) {
+    const sPages = ch.chapter_pages || [];
+    const tPages = tursoPagesMap.get(Number(ch.chapter_number)) || [];
+
+    // Jika Supabase punya gambar tapi Turso belum -> Simpan langsung ke Turso
+    if (sPages.length > 0 && tPages.length === 0 && turso) {
+      try {
+        const imageUrls = sPages.map((p) => p.image_url);
+        const tStmts = imageUrls.map((imgUrl, idx) => ({
+          sql: `
+            INSERT INTO chapter_pages (id, chapter_id, page_number, image_url)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(chapter_id, page_number) DO UPDATE SET image_url = excluded.image_url;
+          `,
+          args: [`${ch.id}_p${idx + 1}`, ch.id, idx + 1, imgUrl],
+        }));
+        tStmts.push({
+          sql: `UPDATE chapters SET pages = ?, status = 'published' WHERE id = ?;`,
+          args: [JSON.stringify(imageUrls), ch.id],
+        });
+        await turso.batch(tStmts, 'write');
+        tursoPagesMap.set(Number(ch.chapter_number), imageUrls);
+        crossSyncedCount++;
+      } catch {}
+    }
+
+    // Jika Turso punya gambar tapi Supabase belum -> Simpan langsung ke Supabase
+    if (tPages.length > 0 && sPages.length === 0) {
+      try {
+        const sRows = tPages.map((imgUrl, idx) => ({
+          chapter_id: ch.id,
+          page_number: idx + 1,
+          image_url: imgUrl,
+        }));
+        await supabase.from('chapter_pages').upsert(sRows, { onConflict: 'chapter_id,page_number' });
+        await supabase.from('chapters').update({ status: 'published' }).eq('id', ch.id);
+        ch.chapter_pages = sRows;
+        crossSyncedCount++;
+      } catch {}
+    }
+  }
+
+  if (crossSyncedCount > 0) {
+    console.log(`   🔄 Auto-sync DB: ${crossSyncedCount} chapter berhasil disinkronkan antar Turso & Supabase!`);
+  }
+
+  // 5. Filter chapter yang BENAR-BENAR belum punya gambar sama sekali
+  let missingChapters = dbChapters.filter((ch) => {
+    const sEmpty = !ch.chapter_pages || ch.chapter_pages.length === 0;
+    const tEmpty = !tursoPagesMap.has(Number(ch.chapter_number));
+    return sEmpty && tEmpty;
+  });
 
   if (missingChapters.length === 0) {
     console.log(`   ✅ Semua ${dbChapters.length} chapter sudah memiliki gambar lengkap!`);
-    return 0;
+    return crossSyncedCount;
   }
 
   if (maxChapters > 0 && missingChapters.length > maxChapters) {
     console.log(`   ⚡ Dibatasi ${maxChapters} chapter terbaru (dari total ${missingChapters.length} chapter tanpa gambar).`);
-    missingChapters = missingChapters.sort((a, b) => b.chapter_number - a.chapter_number).slice(0, maxChapters);
+    missingChapters = missingChapters.slice(0, maxChapters);
   }
 
   console.log(`   ⚠️ Memproses ${missingChapters.length} chapter yang belum punya gambar...`);
 
-  // 2. Kunjungi halaman komik di Westmanga untuk memetakan tautan chapter yang aktif
-  const mapPage = await browser.newPage();
-  await setupPageInterception(mapPage);
-
-  console.log(`   ⏳ Mengambil mapping URL chapter dari Westmanga...`);
-  const comicUrl = `https://v1.westmanga.my/comic/${comic.slug}`;
-
-  let chapterUrlMap = {};
-  try {
-    await mapPage.goto(comicUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
-
-    // Tunggu React SPA me-render link chapter ke dalam DOM
-    await mapPage.waitForFunction(
-      () => Array.from(document.querySelectorAll('a')).some((a) => (a.href || '').includes('/view/')),
-      { timeout: 20000 }
-    );
-
-    const extractedLinks = await mapPage.evaluate(() => {
-      const allA = Array.from(document.querySelectorAll('a[href*="/view/"]'));
-      return allA.map((a) => ({ href: a.href || '', text: a.innerText.trim() }));
-    });
-
-    for (const item of extractedLinks) {
-      const num = extractChapterNumber(item.text, item.href);
-      if (num !== null && !isNaN(num)) {
-        chapterUrlMap[num] = item.href;
-        chapterUrlMap[String(num)] = item.href;
-        chapterUrlMap[num.toFixed(1)] = item.href;
-      }
-    }
-
-    console.log(`   ✓ Ditemukan ${Object.keys(chapterUrlMap).length} tautan chapter aktif di Westmanga.`);
-  } catch (err) {
-    console.warn(`   ⚠️ Gagal memetakan daftar chapter dari Westmanga:`, err.message);
-  } finally {
-    await mapPage.close().catch(() => {});
-  }
-
-  // 3. Gunakan SATU page yang reusable untuk mengambil gambar tiap chapter (super hemat memori & cepat)
+  // 6. Gunakan SATU page reusable dengan response listener terisolasi per-chapter
   const chPage = await browser.newPage();
-  await chPage.setRequestInterception(true);
-
-  let apiImages = [];
-  let interceptedImages = [];
-
-  chPage.on('request', (req) => {
-    const rt = req.resourceType();
-    const url = req.url();
-
-    if (isComicImage(url) && !interceptedImages.includes(url)) {
-      interceptedImages.push(url);
-    }
-
-    if (
-      ['font', 'media'].includes(rt) ||
-      url.includes('google') ||
-      url.includes('histats') ||
-      url.includes('/0ads/') ||
-      url.includes('cloudflareinsights') ||
-      url.includes('doubleclick') ||
-      url.includes('facebook') ||
-      url.includes('analytics')
-    ) {
-      req.abort();
-    } else {
-      req.continue();
-    }
-  });
-
-  chPage.on('response', async (res) => {
-    const url = res.url();
-    if (url.includes('data.mantweh.online/api/v/') && res.request().method() === 'GET') {
-      try {
-        const json = await res.json();
-        if (json.data?.images && Array.isArray(json.data.images)) {
-          const valid = json.data.images.filter(isComicImage);
-          if (valid.length > 0) {
-            apiImages = valid;
-          }
-        }
-      } catch {}
-    }
-  });
+  await setupPageInterception(chPage);
 
   let restoredChaptersCount = 0;
 
@@ -305,26 +437,40 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
 
     for (const targetUrl of candidateUrls) {
       console.log(`   ⏳ Mengambil Ch. ${ch.chapter_number} -> ${targetUrl}`);
-      apiImages = [];
-      interceptedImages = [];
+
+      let apiImages = [];
+      const exactSlug = chapterSlugMap[ch.chapter_number] || chapterSlugMap[String(ch.chapter_number)];
+
+      const chPromise = new Promise((resolve) => {
+        const handler = async (res) => {
+          const u = res.url();
+          const matchesUrl = exactSlug ? u.includes(`/api/v/${exactSlug}`) : u.includes('data.mantweh.online/api/v/');
+          if (matchesUrl && res.status() === 200 && res.request().method() === 'GET') {
+            try {
+              const json = await res.json();
+              if (json.data?.images && Array.isArray(json.data.images)) {
+                const valid = json.data.images.filter(isComicImage);
+                if (valid.length > 0) {
+                  apiImages = valid;
+                  chPage.off('response', handler);
+                  resolve(valid);
+                }
+              }
+            } catch {}
+          }
+        };
+        chPage.on('response', handler);
+        setTimeout(() => {
+          chPage.off('response', handler);
+          resolve(null);
+        }, 8500);
+      });
 
       try {
         await chPage.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await chPromise;
 
-        const waitStart = Date.now();
-        while (apiImages.length === 0 && interceptedImages.length === 0 && Date.now() - waitStart < 4000) {
-          await new Promise((r) => setTimeout(r, 150));
-        }
-
-        // Jika gambar via request sudah masuk, tunggu 500ms agar respon API canonical sempat diterima
-        if (apiImages.length === 0 && interceptedImages.length > 0) {
-          const extraWait = Date.now();
-          while (apiImages.length === 0 && Date.now() - extraWait < 800) {
-            await new Promise((r) => setTimeout(r, 100));
-          }
-        }
-
-        let result = apiImages.length > 0 ? apiImages : interceptedImages;
+        let result = apiImages;
 
         // Fallback DOM jika API terhalang
         if (result.length === 0) {
@@ -338,7 +484,7 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
 
         if (result.length > 0) {
           capturedForChapter = result;
-          break; // Sukses menemukan gambar, tidak perlu cek kandidat URL berikutnya
+          break; // Berhasil menemukan gambar
         }
       } catch (navErr) {
         console.warn(`      ⚠️ Error navigasi: ${navErr.message}`);
@@ -346,6 +492,7 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
     }
 
     if (capturedForChapter.length > 0) {
+      // 1. Simpan ke Turso
       if (turso) {
         try {
           const tStmts = capturedForChapter.map((imgUrl, idx) => ({
@@ -367,6 +514,7 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
         }
       }
 
+      // 2. Simpan ke Supabase
       const rows = capturedForChapter.map((imgUrl, idx) => ({
         chapter_id: ch.id,
         page_number: idx + 1,
@@ -387,12 +535,12 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
       console.warn(`      ⚠️ Tidak ada gambar ditemukan untuk Ch ${ch.chapter_number}.`);
     }
 
-    // Jeda kecil antar chapter agar stabil
-    await new Promise((r) => setTimeout(r, 200));
+    // Jeda kecil antar chapter agar stabil & tidak membebani server
+    await new Promise((r) => setTimeout(r, 150));
   }
 
   await chPage.close().catch(() => {});
-  return restoredChaptersCount;
+  return restoredChaptersCount + crossSyncedCount;
 }
 
 async function main() {

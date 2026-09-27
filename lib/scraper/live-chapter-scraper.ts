@@ -212,7 +212,7 @@ export async function scrapeLiveChapterPages(
       }
     });
 
-    // Variasi URL chapter di Westmanga:
+    const num = Number(chapterNumber);
     const numStr = String(chapterNumber);
     const isDecimal = numStr.includes('.');
     const padStr = isDecimal
@@ -221,21 +221,32 @@ export async function scrapeLiveChapterPages(
     const dashStr = numStr.replace('.', '-');
     const padDashStr = padStr.replace('.', '-');
 
-    const rawCandidates = [
-      // Prioritaskan format standar Westmanga: pad 2 digit + bahasa-indonesia
-      `${comicSlug}-chapter-${padStr}-bahasa-indonesia`,
-      `${comicSlug}-chapter-${numStr}-bahasa-indonesia`,
-      ...(isDecimal ? [
-        `${comicSlug}-chapter-${padDashStr}-bahasa-indonesia`,
-        `${comicSlug}-chapter-${dashStr}-bahasa-indonesia`,
-      ] : []),
-      `${comicSlug}-chapter-${padStr}`,
-      `${comicSlug}-chapter-${numStr}`,
-      ...(isDecimal ? [
-        `${comicSlug}-chapter-${padDashStr}`,
-        `${comicSlug}-chapter-${dashStr}`,
-      ] : []),
-    ];
+    // Untuk chapter >= 100, Westmanga umumnya menggunakan format langsung `chapter-1194` tanpa suffix
+    const isLargeNum = num >= 100;
+    const rawCandidates = isLargeNum
+      ? [
+          `${comicSlug}-chapter-${numStr}`,
+          `${comicSlug}-chapter-${numStr}-bahasa-indonesia`,
+          `${comicSlug}-chapter-${padStr}`,
+          `${comicSlug}-chapter-${padStr}-bahasa-indonesia`,
+          ...(isDecimal ? [
+            `${comicSlug}-chapter-${dashStr}`,
+            `${comicSlug}-chapter-${dashStr}-bahasa-indonesia`,
+            `${comicSlug}-chapter-${padDashStr}`,
+          ] : []),
+        ]
+      : [
+          `${comicSlug}-chapter-${padStr}-bahasa-indonesia`,
+          `${comicSlug}-chapter-${numStr}-bahasa-indonesia`,
+          `${comicSlug}-chapter-${padStr}`,
+          `${comicSlug}-chapter-${numStr}`,
+          ...(isDecimal ? [
+            `${comicSlug}-chapter-${padDashStr}-bahasa-indonesia`,
+            `${comicSlug}-chapter-${dashStr}-bahasa-indonesia`,
+            `${comicSlug}-chapter-${padDashStr}`,
+            `${comicSlug}-chapter-${dashStr}`,
+          ] : []),
+        ];
 
     // Deduplikasi kandidat slug agar tidak ada URL yang diuji 2 kali
     const candidateSlugs = Array.from(new Set(rawCandidates));
