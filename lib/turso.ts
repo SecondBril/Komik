@@ -3,6 +3,10 @@ import { createClient } from '@libsql/client';
 let tursoClientInstance: ReturnType<typeof createClient> | null = null;
 
 export function getTursoClient() {
+  if (typeof window !== 'undefined') {
+    return null;
+  }
+
   if (tursoClientInstance) return tursoClientInstance;
 
   const url = process.env.TURSO_DATABASE_URL || process.env.NEXT_PUBLIC_TURSO_DATABASE_URL || '';

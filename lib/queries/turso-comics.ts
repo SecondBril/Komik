@@ -164,7 +164,10 @@ export async function getTursoPopularComics(limit = 10): Promise<Comic[]> {
 
 export async function getTursoComicBySlug(slug: string): Promise<Comic | null> {
   const turso = getTursoClient();
-  if (!turso) return null;
+  if (!turso || !slug) return null;
+
+  const rawSlug = slug.trim();
+  const decodedSlug = decodeURIComponent(rawSlug);
 
   try {
     const res = await turso.execute({
@@ -180,10 +183,10 @@ export async function getTursoComicBySlug(slug: string): Promise<Comic | null> {
             WHERE cg.comic_id = c.id
           ) as genres_json
         FROM comics c
-        WHERE c.slug = ?
+        WHERE c.slug = ? OR c.slug = ? OR LOWER(c.slug) = LOWER(?)
         LIMIT 1;
       `,
-      args: [slug],
+      args: [rawSlug, decodedSlug, decodedSlug],
     });
 
     if (res.rows.length === 0) return null;
@@ -372,7 +375,10 @@ export async function getTursoBrowseComics(params: TursoBrowseParams): Promise<{
 
 export async function getTursoComicChapters(comicSlug: string): Promise<Chapter[]> {
   const turso = getTursoClient();
-  if (!turso) return [];
+  if (!turso || !comicSlug) return [];
+
+  const rawSlug = comicSlug.trim();
+  const decodedSlug = decodeURIComponent(rawSlug);
 
   try {
     const res = await turso.execute({
@@ -380,10 +386,10 @@ export async function getTursoComicChapters(comicSlug: string): Promise<Chapter[
         SELECT ch.id, ch.comic_id, ch.chapter_number, ch.title, ch.status, ch.pages, ch.released_at, ch.created_at
         FROM chapters ch
         JOIN comics c ON c.id = ch.comic_id
-        WHERE c.slug = ?
+        WHERE c.slug = ? OR c.slug = ? OR LOWER(c.slug) = LOWER(?)
         ORDER BY ch.chapter_number DESC;
       `,
-      args: [comicSlug],
+      args: [rawSlug, decodedSlug, decodedSlug],
     });
 
     return res.rows.map((r: any) => ({
