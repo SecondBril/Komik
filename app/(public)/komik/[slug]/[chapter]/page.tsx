@@ -141,21 +141,19 @@ export default function ReadingViewerPage() {
     }
   };
 
-  // Auto-hide navigation on scroll down, show on scroll up
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      if (currentScrollY > 50 && currentScrollY > lastScrollY) {
-        setIsNavVisible(false);
-      } else if (currentScrollY < lastScrollY) {
-        setIsNavVisible(true);
-      }
-      setLastScrollY(currentScrollY);
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [lastScrollY]);
+  // Click handler to toggle fly controls and navigation
+  const handleToggleControls = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // Don't toggle if clicking on links, buttons, inputs, dropdowns, or controls
+    if (
+      target.closest('button, a, input, select, textarea, [role="button"]') ||
+      target.closest('aside') ||
+      target.closest('[data-no-toggle]')
+    ) {
+      return;
+    }
+    setIsNavVisible((prev) => !prev);
+  };
 
   const loadData = async () => {
     if (!slug || isNaN(chapterNo)) return;
@@ -301,7 +299,7 @@ export default function ReadingViewerPage() {
   return (
     <div
       className="min-h-screen bg-[#18181B] text-white pt-14 pb-20 select-none cursor-pointer"
-      onClick={() => setIsNavVisible((prev) => !prev)}
+      onClick={handleToggleControls}
     >
       {/* Neo-Comic Reader Header & Bottom Controls */}
       <ChapterNav
@@ -434,6 +432,7 @@ export default function ReadingViewerPage() {
       {/* Neo-Comic Floating Navigation & Auto-Scroll Controls */}
       {pages.length > 0 && (
         <ReaderFloatingControls
+          isVisible={isNavVisible}
           onScrollToTop={handleScrollToFirst}
           onScrollToBottom={handleScrollToLast}
           isAutoScrolling={isAutoScrolling}

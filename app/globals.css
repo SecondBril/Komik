@@ -19,6 +19,108 @@ body {
   overflow-x: clip;
   min-height: 100vh;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* ── Dark Mode Inverted Neo-Comic Theme ───────────────────────────────────── */
+html.dark body {
+  background-color: #121316;
+  color: #F2F3F5;
+}
+
+/* Base Canvas & Containers Inversion */
+html.dark .bg-\[\#F7F2E6\] {
+  background-color: #121316 !important;
+}
+
+html.dark .bg-white {
+  background-color: #191B22 !important;
+}
+
+html.dark .bg-\[\#FAF7F0\] {
+  background-color: #222530 !important;
+}
+
+/* Scrolled Navbars & Translucent Backdrops in Dark Mode */
+html.dark .bg-\[\#F7F2E6\]\/95,
+html.dark .bg-\[\#F7F2E6\]\/90,
+html.dark .bg-\[\#F7F2E6\]\/80,
+html.dark .bg-white\/95,
+html.dark .bg-white\/90,
+html.dark .bg-white\/80 {
+  background-color: rgba(18, 19, 22, 0.92) !important;
+}
+
+/* Navbars, Sticky & Fixed headers in Dark Mode */
+html.dark header.sticky,
+html.dark header.fixed,
+html.dark nav.fixed {
+  border-color: #2D323E !important;
+}
+
+/* Text Inversion (Preserve dark text on yellow/bright accent buttons) */
+html.dark .text-\[\#1A1A1A\]:not(.bg-\[\#F6C945\] *):not(.bg-\[\#EDB72B\] *):not(.bg-\[\#FFE17D\] *):not(button.bg-\[\#F6C945\]):not(a.bg-\[\#F6C945\]) {
+  color: #F2F3F5 !important;
+}
+
+html.dark .text-\[\#7A756D\],
+html.dark .text-\[\#666\],
+html.dark .text-\[\#555\],
+html.dark .text-\[\#4A453E\],
+html.dark .text-\[\#8C8C8C\] {
+  color: #9CA3AF !important;
+}
+
+/* Subtle glowing blobs in dark mode */
+html.dark .pointer-events-none > div[class*="rounded-full"] {
+  opacity: 0.35 !important;
+}
+
+/* Immersive pitch dark for chapter reading */
+html.dark .bg-\[\#18181B\] {
+  background-color: #0A0B0E !important;
+}
+
+/* Form Inputs in Dark Mode */
+html.dark input[type="text"],
+html.dark input[type="search"],
+html.dark textarea,
+html.dark select {
+  background-color: #191B22 !important;
+  color: #F2F3F5 !important;
+  border-color: #2D323E !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #6B7280 !important;
+}
+
+/* Comic Neo-brutalist Borders & Shadows Inversion */
+html.dark .border-\[\#1A1A1A\] {
+  border-color: #2D323E !important;
+}
+
+html.dark .border-\[\#1A1A1A\]\/10,
+html.dark .border-\[\#1A1A1A\]\/20,
+html.dark .border-\[\#1A1A1A\]\/30 {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+html.dark .shadow-\[1px_1px_0px_\#1A1A1A\],
+html.dark .shadow-\[2px_2px_0px_\#1A1A1A\],
+html.dark .shadow-\[3px_3px_0px_\#1A1A1A\],
+html.dark .shadow-\[4px_4px_0px_\#1A1A1A\],
+html.dark .shadow-\[5px_5px_0px_\#1A1A1A\],
+html.dark .shadow-\[6px_6px_0px_\#1A1A1A\],
+html.dark .shadow-\[8px_8px_0px_\#1A1A1A\] {
+  box-shadow: 3px 3px 0px #000000 !important;
+}
+
+/* Footer & Popovers */
+html.dark footer {
+  background-color: #15171E !important;
+  border-color: #2D323E !important;
 }
 
 /* Organic Curved Header */
@@ -74,13 +176,25 @@ body {
   box-shadow: 2px 2px 0px #1A1A1A;
   transition: all 0.15s ease-in-out;
 }
+html.dark .btn-comic-white {
+  background-color: #222530;
+  color: #F2F3F5;
+  border-color: #2D323E;
+  box-shadow: 2px 2px 0px #000000;
+}
 .btn-comic-white:hover {
   transform: translate(-1px, -1px);
   box-shadow: 3px 3px 0px #1A1A1A;
 }
+html.dark .btn-comic-white:hover {
+  box-shadow: 3px 3px 0px #000000;
+}
 .btn-comic-white:active {
   transform: translate(1px, 1px);
   box-shadow: 1px 1px 0px #1A1A1A;
+}
+html.dark .btn-comic-white:active {
+  box-shadow: 1px 1px 0px #000000;
 }
 
 .card-comic-teal {
@@ -110,11 +224,18 @@ body {
 ::-webkit-scrollbar-track {
   background: #F7F2E6;
 }
+html.dark ::-webkit-scrollbar-track {
+  background: #121316;
+}
 
 ::-webkit-scrollbar-thumb {
   background: #D9D3C5;
   border-radius: 9999px;
   border: 1px solid #1A1A1A;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #2D323E;
+  border: 1px solid #3E4452;
 }
 
 ::-webkit-scrollbar-thumb:hover {

@@ -13,7 +13,10 @@ import {
   X,
   Sparkles,
   GripVertical,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import { useTheme } from '@/components/theme/ThemeProvider';
 
 interface ReaderFloatingControlsProps {
   onScrollToTop: () => void;
@@ -25,6 +28,7 @@ interface ReaderFloatingControlsProps {
   readMode: 'scroll' | 'paged';
   currentPage?: number;
   totalPages?: number;
+  isVisible?: boolean;
 }
 
 export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
@@ -37,56 +41,18 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
   readMode,
   currentPage,
   totalPages,
+  isVisible = true,
 }) => {
   const [isSpeedOpen, setIsSpeedOpen] = useState(false);
-  const [isVisible, setIsVisible] = useState(true);
+  const { theme, toggleTheme } = useTheme();
   const popoverRef = useRef<HTMLDivElement>(null);
-  const lastScrollY = useRef(0);
 
-  // ── Auto-hide on scroll down, show on scroll up (only when NOT auto-scrolling) ──
+  // Close speed popover if controls are hidden
   useEffect(() => {
-    // If auto-scroll is actively playing, ALWAYS keep the controls visible so user can pause
-    if (isAutoScrolling) {
-      setIsVisible(true);
-      return;
+    if (!isVisible && !isAutoScrolling) {
+      setIsSpeedOpen(false);
     }
-
-    let ticking = false;
-    const handleScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          const currentScrollY = window.scrollY || document.documentElement.scrollTop;
-          const diff = currentScrollY - lastScrollY.current;
-
-          // Don't hide if user is currently dragging the dock
-          if (dragRef.current.active) {
-            lastScrollY.current = Math.max(0, currentScrollY);
-            ticking = false;
-            return;
-          }
-
-          // Trigger hide/show based on scroll direction with a 10px threshold
-          if (Math.abs(diff) > 10) {
-            if (currentScrollY > 80 && diff > 0) {
-              // Scrolling DOWN: hide dock & close speed popover
-              setIsVisible(false);
-              setIsSpeedOpen(false);
-            } else if (diff < 0) {
-              // Scrolling UP: reveal dock
-              setIsVisible(true);
-            }
-          }
-
-          lastScrollY.current = Math.max(0, currentScrollY);
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [isAutoScrolling]);
+  }, [isVisible, isAutoScrolling]);
 
   // ── Drag state (Pointer Events — responsive with capture) ──────────────────
   const [pos, setPos] = useState<{ right: number; bottom: number }>({ right: 16, bottom: 88 });
@@ -171,12 +137,14 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
     if (scrollSpeedSeconds < 15) onChangeSpeedSeconds(scrollSpeedSeconds + 1);
   };
 
-  return (
+    const shouldShow = isAutoScrolling || isVisible;
+
+    return (
     <aside
       aria-label="Kontrol Navigasi & Auto-Scroll Pembaca"
       style={{ right: pos.right, bottom: pos.bottom }}
       className={`fixed z-40 flex flex-col items-center select-none transition-all duration-300 ease-in-out ${
-        isVisible || isAutoScrolling
+        shouldShow
           ? 'opacity-100 translate-y-0 pointer-events-auto'
           : 'opacity-0 translate-y-12 pointer-events-none'
       }`}
@@ -186,7 +154,7 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
       {isSpeedOpen && !isAutoScrolling && (
         <div
           ref={popoverRef}
-          className={`absolute w-64 sm:w-72 bg-[#F7F2E6] text-[#1A1A1A] border-[3px] border-[#1A1A1A] rounded-[24px] p-4 shadow-[5px_5px_0px_#1A1A1A] duration-150 z-50 flex flex-col gap-3 max-h-[85vh] overflow-y-auto ${
+          className={`absolute w-64 sm:w-72 bg-[#F7F2E6] dark:bg-[#181A20] text-[#1A1A1A] dark:text-[#F2F3F5] border-[3px] border-[#1A1A1A] dark:border-[#2D323E] rounded-[24px] p-4 shadow-[5px_5px_0px_#1A1A1A] dark:shadow-[5px_5px_0px_#000000] duration-150 z-50 flex flex-col gap-3 max-h-[85vh] overflow-y-auto ${
             popoverOpensLeft
               ? 'right-14 sm:right-16 slide-in-from-right-2'
               : 'left-14 sm:left-16 slide-in-from-left-2'
@@ -197,42 +165,42 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
           }`}
         >
           {/* Popover Header */}
-          <div className="flex items-center justify-between pb-2 border-b-2 border-[#1A1A1A]">
+          <div className="flex items-center justify-between pb-2 border-b-2 border-[#1A1A1A] dark:border-[#2D323E]">
             <div className="flex items-center gap-1.5">
-              <div className="w-6 h-6 rounded-full bg-[#F6C945] border border-[#1A1A1A] flex items-center justify-center">
+              <div className="w-6 h-6 rounded-full bg-[#F6C945] border border-[#1A1A1A] dark:border-[#2D323E] flex items-center justify-center">
                 <Timer className="w-3.5 h-3.5 text-[#1A1A1A]" />
               </div>
-              <span className="text-xs font-black tracking-tight text-[#1A1A1A]">
+              <span className="text-xs font-black tracking-tight text-[#1A1A1A] dark:text-[#F2F3F5]">
                 Kecepatan Auto-Scroll
               </span>
             </div>
             <button
               type="button"
               onClick={() => setIsSpeedOpen(false)}
-              className="w-6 h-6 rounded-full bg-white hover:bg-[#FAF7F0] border border-[#1A1A1A] flex items-center justify-center text-[#1A1A1A] transition-colors"
+              className="w-6 h-6 rounded-full bg-white dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] border border-[#1A1A1A] dark:border-[#2D323E] flex items-center justify-center text-[#1A1A1A] dark:text-[#F2F3F5] transition-colors"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
 
           {/* Stepper Display */}
-          <div className="flex items-center justify-between bg-white border-2 border-[#1A1A1A] rounded-2xl p-2 shadow-inner">
+          <div className="flex items-center justify-between bg-white dark:bg-[#121316] border-2 border-[#1A1A1A] dark:border-[#2D323E] rounded-2xl p-2 shadow-inner">
             <button type="button" onClick={handleDecreaseSpeed} disabled={scrollSpeedSeconds <= 1}
-              className="w-8 h-8 rounded-xl bg-[#F7F2E6] hover:bg-[#FAF7F0] border border-[#1A1A1A] flex items-center justify-center font-black disabled:opacity-30 disabled:cursor-not-allowed shadow-[1px_1px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px]"
+              className="w-8 h-8 rounded-xl bg-[#F7F2E6] dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] border border-[#1A1A1A] dark:border-[#2D323E] text-[#1A1A1A] dark:text-[#F2F3F5] flex items-center justify-center font-black disabled:opacity-30 disabled:cursor-not-allowed shadow-[1px_1px_0px_#1A1A1A] dark:shadow-[1px_1px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px]"
               title="Kurang 1 detik">
               <Minus className="w-4 h-4 stroke-[3]" />
             </button>
             <div className="flex flex-col items-center">
               <div className="flex items-baseline gap-1">
-                <span className="text-xl font-black text-[#1A1A1A]">{scrollSpeedSeconds}</span>
-                <span className="text-[11px] font-bold text-[#7A756D]">detik</span>
+                <span className="text-xl font-black text-[#1A1A1A] dark:text-[#F2F3F5]">{scrollSpeedSeconds}</span>
+                <span className="text-[11px] font-bold text-[#7A756D] dark:text-[#9CA3AF]">detik</span>
               </div>
-              <span className="text-[9px] font-bold text-[#2E7D6E]">
+              <span className="text-[9px] font-bold text-[#2E7D6E] dark:text-[#38D9A9]">
                 {readMode === 'scroll' ? 'detik / layar (smooth)' : 'detik / halaman'}
               </span>
             </div>
             <button type="button" onClick={handleIncreaseSpeed} disabled={scrollSpeedSeconds >= 15}
-              className="w-8 h-8 rounded-xl bg-[#F7F2E6] hover:bg-[#FAF7F0] border border-[#1A1A1A] flex items-center justify-center font-black disabled:opacity-30 disabled:cursor-not-allowed shadow-[1px_1px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px]"
+              className="w-8 h-8 rounded-xl bg-[#F7F2E6] dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] border border-[#1A1A1A] dark:border-[#2D323E] text-[#1A1A1A] dark:text-[#F2F3F5] flex items-center justify-center font-black disabled:opacity-30 disabled:cursor-not-allowed shadow-[1px_1px_0px_#1A1A1A] dark:shadow-[1px_1px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px]"
               title="Tambah 1 detik">
               <Plus className="w-4 h-4 stroke-[3]" />
             </button>
@@ -240,14 +208,14 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
 
           {/* Preset Chips */}
           <div>
-            <span className="text-[10px] font-black text-[#7A756D] uppercase tracking-wider block mb-1.5">Pilihan Cepat:</span>
+            <span className="text-[10px] font-black text-[#7A756D] dark:text-[#9CA3AF] uppercase tracking-wider block mb-1.5">Pilihan Cepat:</span>
             <div className="grid grid-cols-3 gap-1.5">
               {presetSpeeds.map((sec) => (
                 <button key={sec} type="button" onClick={() => onChangeSpeedSeconds(sec)}
-                  className={`py-1.5 px-2 rounded-xl border-2 border-[#1A1A1A] text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                  className={`py-1.5 px-2 rounded-xl border-2 border-[#1A1A1A] dark:border-[#2D323E] text-xs font-black transition-all flex items-center justify-center gap-1 ${
                     scrollSpeedSeconds === sec
-                      ? 'bg-[#F6C945] shadow-[2px_2px_0px_#1A1A1A] -translate-y-0.5'
-                      : 'bg-white hover:bg-[#FAF7F0] shadow-sm'
+                      ? 'bg-[#F6C945] text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] -translate-y-0.5'
+                      : 'bg-white dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] text-[#1A1A1A] dark:text-[#F2F3F5] shadow-sm'
                   }`}>
                   <span>{sec}s</span>
                   {scrollSpeedSeconds === sec && <Check className="w-3 h-3 stroke-[3]" />}
@@ -257,7 +225,7 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
           </div>
 
           {/* Mode Hint */}
-          <div className="px-2.5 py-1.5 rounded-xl bg-[#E6F4EA] border border-[#1A1A1A] text-[10px] font-bold text-[#2E7D6E] flex items-center gap-1.5">
+          <div className="px-2.5 py-1.5 rounded-xl bg-[#E6F4EA] dark:bg-[#1B3830] border border-[#1A1A1A] dark:border-[#2D323E] text-[10px] font-bold text-[#2E7D6E] dark:text-[#38D9A9] flex items-center gap-1.5">
             <Sparkles className="w-3 h-3 shrink-0" />
             <span>
               {readMode === 'scroll'
@@ -270,7 +238,7 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
 
       {/* ── Main Floating Dock ─────────────────────────────────────────────── */}
       <div
-        className={`bg-[#F7F2E6] border-[3px] border-[#1A1A1A] rounded-[26px] shadow-[4px_4px_0px_#1A1A1A] flex flex-col items-center transition-all duration-300 ease-in-out ${
+        className={`bg-[#F7F2E6] dark:bg-[#181A20] border-[3px] border-[#1A1A1A] dark:border-[#2D323E] rounded-[26px] shadow-[4px_4px_0px_#1A1A1A] dark:shadow-[4px_4px_0px_#000000] flex flex-col items-center transition-all duration-300 ease-in-out ${
           isAutoScrolling ? 'p-1.5 gap-0' : 'p-1.5 sm:p-2 gap-2'
         }`}
       >
@@ -283,7 +251,7 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
           className="w-full flex justify-center pt-1 pb-1.5 cursor-grab active:cursor-grabbing touch-none select-none"
           title="Geser untuk memindahkan"
         >
-          <GripVertical className="w-5 h-5 text-[#BFBAB0]" />
+          <GripVertical className="w-5 h-5 text-[#BFBAB0] dark:text-[#525866]" />
         </div>
 
         {/* ── COLLAPSED (playing): only Pause button ── */}
@@ -292,7 +260,7 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
             <button
               type="button"
               onClick={onToggleAutoScroll}
-              className="w-11 h-11 rounded-2xl bg-[#2E7D6E] text-white border-2 border-[#1A1A1A] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0px_#1A1A1A] ring-2 ring-[#2E7D6E]/40 transition-all"
+              className="w-11 h-11 rounded-2xl bg-[#2E7D6E] text-white border-2 border-[#1A1A1A] dark:border-[#2D323E] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px] ring-2 ring-[#2E7D6E]/40 transition-all"
               title="Jeda Auto-Scroll"
               aria-label="Jeda Auto Scroll"
             >
@@ -311,7 +279,7 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
             <button
               type="button"
               onClick={onScrollToTop}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-[#1A1A1A] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0px_#1A1A1A] transition-all group"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] border-2 border-[#1A1A1A] dark:border-[#2D323E] text-[#1A1A1A] dark:text-[#F2F3F5] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px] transition-all group"
               title="Menuju Gambar Pertama (Awal)"
               aria-label="Menuju Gambar Pertama"
             >
@@ -322,7 +290,7 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
             <button
               type="button"
               onClick={onToggleAutoScroll}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl border-2 border-[#1A1A1A] bg-[#F6C945] hover:bg-[#EDB72B] text-[#1A1A1A] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0px_#1A1A1A] transition-all"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl border-2 border-[#1A1A1A] dark:border-[#2D323E] bg-[#F6C945] hover:bg-[#EDB72B] text-[#1A1A1A] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px] transition-all"
               title={`Mulai Auto-Scroll (Setiap ${scrollSpeedSeconds} detik)`}
               aria-label="Mulai Auto Scroll"
             >
@@ -333,8 +301,8 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
             <button
               type="button"
               onClick={() => setIsSpeedOpen(!isSpeedOpen)}
-              className={`px-2 py-1 rounded-xl border-2 border-[#1A1A1A] text-[10px] font-black shadow-[1px_1px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-0.5 ${
-                isSpeedOpen ? 'bg-[#F6C945] text-[#1A1A1A]' : 'bg-white hover:bg-[#FAF7F0] text-[#1A1A1A]'
+              className={`px-2 py-1 rounded-xl border-2 border-[#1A1A1A] dark:border-[#2D323E] text-[10px] font-black shadow-[1px_1px_0px_#1A1A1A] dark:shadow-[1px_1px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-0.5 ${
+                isSpeedOpen ? 'bg-[#F6C945] text-[#1A1A1A]' : 'bg-white dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] text-[#1A1A1A] dark:text-[#F2F3F5]'
               }`}
               title="Atur Kecepatan Auto-Scroll"
               aria-label="Atur Kecepatan Auto Scroll"
@@ -347,11 +315,26 @@ export const ReaderFloatingControls: React.FC<ReaderFloatingControlsProps> = ({
             <button
               type="button"
               onClick={onScrollToBottom}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white hover:bg-[#FAF7F0] border-2 border-[#1A1A1A] text-[#1A1A1A] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0px_#1A1A1A] transition-all group"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] border-2 border-[#1A1A1A] dark:border-[#2D323E] text-[#1A1A1A] dark:text-[#F2F3F5] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px] transition-all group"
               title="Menuju Gambar Terakhir (Selesai)"
               aria-label="Menuju Gambar Terakhir"
             >
               <ChevronsDown className="w-5 h-5 stroke-[2.5] group-hover:translate-y-0.5 transition-transform" />
+            </button>
+
+            {/* 5. Theme Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white dark:bg-[#222530] hover:bg-[#FAF7F0] dark:hover:bg-[#2A2E3D] border-2 border-[#1A1A1A] dark:border-[#2D323E] text-[#1A1A1A] dark:text-[#F2F3F5] flex items-center justify-center shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              title={theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
+              aria-label="Ganti Tema"
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-[#F6C945] stroke-[2.5]" />
+              ) : (
+                <Moon className="w-4 h-4 text-[#1A1A1A] stroke-[2.5]" />
+              )}
             </button>
           </>
         )}

@@ -4,16 +4,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Search, Compass, User, LogOut, X, History, Shield } from 'lucide-react';
+import { Search, Compass, User, LogOut, X, History, Shield, Sun, Moon } from 'lucide-react';
 import { Comic } from '@/lib/types';
 import { Toast } from '@/components/ui/Toast';
 import { ChameleonMascot } from '@/components/ui/ChameleonMascot';
 import { GoogleAuthModal } from '@/components/auth/GoogleAuthModal';
 import { createClient } from '@/lib/supabase/client';
 import { mergeGuestHistoryToSupabase } from '@/lib/queries/history';
+import { useTheme } from '@/components/theme/ThemeProvider';
 
 export const Navbar: React.FC = () => {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Comic[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -149,10 +151,10 @@ export const Navbar: React.FC = () => {
   return (
     <>
       <header
-        className={`sticky top-0 z-50 w-full transition-all duration-200 border-b-2 border-[#1A1A1A] ${
+        className={`sticky top-0 z-50 w-full transition-all duration-200 border-b-2 border-[#1A1A1A] dark:border-[#2D323E] ${
           isScrolled
-            ? 'bg-[#F7F2E6]/95 backdrop-blur-md shadow-[0_4px_16px_rgba(0,0,0,0.08)] py-2'
-            : 'bg-[#F7F2E6] py-2.5 sm:py-3'
+            ? 'bg-[#F7F2E6]/95 dark:bg-[#121316]/95 backdrop-blur-md shadow-[0_4px_16px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.6)] py-2'
+            : 'bg-[#F7F2E6] dark:bg-[#121316] py-2.5 sm:py-3'
         }`}
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
@@ -161,7 +163,7 @@ export const Navbar: React.FC = () => {
           <Link href="/" className="flex items-center gap-2.5 group shrink-0">
             <ChameleonMascot variant="avatar" size={40} />
             <div className="flex flex-col">
-              <span className="text-base sm:text-xl font-black tracking-tight text-[#1A1A1A] group-hover:text-[#2E7D6E] transition-colors leading-none">
+              <span className="text-base sm:text-xl font-black tracking-tight text-[#1A1A1A] dark:text-[#F2F3F5] group-hover:text-[#2E7D6E] transition-colors leading-none">
                 Chameleon
               </span>
               <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#2E7D6E]">
@@ -178,14 +180,14 @@ export const Navbar: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Cari judul komik, karakter..."
-                className="w-full bg-white border-2 border-[#1A1A1A] rounded-full py-2 pl-10 pr-8 text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-[2px_2px_0px_#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
+                className="w-full bg-white dark:bg-[#191B22] border-2 border-[#1A1A1A] dark:border-[#2D323E] rounded-full py-2 pl-10 pr-8 text-xs font-bold text-[#1A1A1A] dark:text-[#F2F3F5] placeholder-[#8C8C8C] dark:placeholder-[#6B7280] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
               />
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#1A1A1A] stroke-[2.5]" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#1A1A1A] dark:text-[#9CA3AF] stroke-[2.5]" />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8C8C8C] hover:text-[#1A1A1A]"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8C8C8C] dark:text-[#9CA3AF] hover:text-[#1A1A1A] dark:hover:text-[#F2F3F5]"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -194,13 +196,13 @@ export const Navbar: React.FC = () => {
 
             {/* Quick Live Search Dropdown */}
             {isSearchOpen && (
-              <div className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl border-2 border-[#1A1A1A] shadow-[4px_4px_0px_#1A1A1A] overflow-hidden z-50 p-2 flex flex-col gap-1 max-h-96 overflow-y-auto">
+              <div className="absolute left-0 right-0 top-full mt-2 bg-white dark:bg-[#181A20] rounded-2xl border-2 border-[#1A1A1A] dark:border-[#2D323E] shadow-[4px_4px_0px_#1A1A1A] dark:shadow-[4px_4px_0px_#000000] overflow-hidden z-50 p-2 flex flex-col gap-1 max-h-96 overflow-y-auto">
                 {isSearching ? (
-                  <div className="p-3 text-center text-xs font-bold text-[#7A756D]">
+                  <div className="p-3 text-center text-xs font-bold text-[#7A756D] dark:text-[#9CA3AF]">
                     Mencari komik di database...
                   </div>
                 ) : searchResults.length === 0 ? (
-                  <div className="p-3 text-center text-xs font-bold text-[#7A756D]">
+                  <div className="p-3 text-center text-xs font-bold text-[#7A756D] dark:text-[#9CA3AF]">
                     Tidak ditemukan komik dengan judul &quot;{searchQuery}&quot;
                   </div>
                 ) : (
@@ -209,16 +211,16 @@ export const Navbar: React.FC = () => {
                       key={c.id}
                       href={`/komik/${c.slug}`}
                       onClick={() => setIsSearchOpen(false)}
-                      className="flex items-center gap-3 p-2 rounded-xl hover:bg-[#FAF7F0] transition-colors group"
+                      className="flex items-center gap-3 p-2 rounded-xl hover:bg-[#FAF7F0] dark:hover:bg-[#222530] transition-colors group"
                     >
-                      <div className="relative w-10 h-14 rounded-lg overflow-hidden shrink-0 border border-[#1A1A1A] bg-[#FAF7F0]">
+                      <div className="relative w-10 h-14 rounded-lg overflow-hidden shrink-0 border border-[#1A1A1A] dark:border-[#2D323E] bg-[#FAF7F0] dark:bg-[#121316]">
                         <Image src={c.cover_url} alt={c.title} fill className="object-cover" />
                       </div>
                       <div className="flex flex-col flex-1 truncate">
-                        <span className="text-xs font-black text-[#1A1A1A] group-hover:text-[#2E7D6E] truncate">
+                        <span className="text-xs font-black text-[#1A1A1A] dark:text-[#F2F3F5] group-hover:text-[#2E7D6E] dark:group-hover:text-[#38D9A9] truncate">
                           {c.title}
                         </span>
-                        <span className="text-[11px] text-[#7A756D]">
+                        <span className="text-[11px] text-[#7A756D] dark:text-[#9CA3AF]">
                           Ch. {c.latest_chapter?.chapter_number || 1} • {c.type.toUpperCase()} • Rating {c.rating.toFixed(1)}
                         </span>
                       </div>
@@ -234,7 +236,7 @@ export const Navbar: React.FC = () => {
             {/* Hidden on mobile, shown on md+ (tablet & desktop) */}
             <Link
               href="/browse"
-              className="hidden md:flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#FAF7F0] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              className="hidden md:flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white dark:bg-[#1E2028] border-2 border-[#1A1A1A] dark:border-[#2D323E] text-xs font-black text-[#1A1A1A] dark:text-[#F2F3F5] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] hover:bg-[#FAF7F0] dark:hover:bg-[#252834] active:translate-x-[1px] active:translate-y-[1px] transition-all"
             >
               <Compass className="w-3.5 h-3.5" />
               <span>Browse</span>
@@ -242,7 +244,7 @@ export const Navbar: React.FC = () => {
 
             <Link
               href="/history"
-              className="hidden md:flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#FAF7F0] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              className="hidden md:flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white dark:bg-[#1E2028] border-2 border-[#1A1A1A] dark:border-[#2D323E] text-xs font-black text-[#1A1A1A] dark:text-[#F2F3F5] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] hover:bg-[#FAF7F0] dark:hover:bg-[#252834] active:translate-x-[1px] active:translate-y-[1px] transition-all"
             >
               <History className="w-3.5 h-3.5" />
               <span>History</span>
@@ -252,7 +254,7 @@ export const Navbar: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsMobileSearchOpen((prev) => !prev)}
-              className="md:hidden w-8 h-8 rounded-full bg-white border-2 border-[#1A1A1A] flex items-center justify-center text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              className="md:hidden w-8 h-8 rounded-full bg-white dark:bg-[#1E2028] border-2 border-[#1A1A1A] dark:border-[#2D323E] flex items-center justify-center text-[#1A1A1A] dark:text-[#F2F3F5] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] hover:bg-[#FAF7F0] dark:hover:bg-[#252834] active:translate-x-[1px] active:translate-y-[1px] transition-all"
               aria-label="Cari Komik"
               title="Cari Komik"
             >
@@ -263,11 +265,26 @@ export const Navbar: React.FC = () => {
               )}
             </button>
 
+            {/* Theme Toggle Button (Light/Dark Mode) */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="w-8 h-8 rounded-full bg-white dark:bg-[#1E2028] border-2 border-[#1A1A1A] dark:border-[#2D323E] flex items-center justify-center text-[#1A1A1A] dark:text-[#F2F3F5] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] hover:bg-[#FAF7F0] dark:hover:bg-[#252834] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              aria-label={theme === 'dark' ? 'Ganti ke Mode Terang' : 'Ganti ke Mode Gelap'}
+              title={theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-[#F6C945] stroke-[2.5]" />
+              ) : (
+                <Moon className="w-4 h-4 text-[#1A1A1A] stroke-[2.5]" />
+              )}
+            </button>
+
             {/* Login / Profile Button - Shown on ALL screens */}
             {isUserLoggedIn ? (
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-full bg-white border-2 border-[#1A1A1A] text-xs font-black text-[#1A1A1A] shadow-[2px_2px_0px_#1A1A1A] hover:bg-[#FAF7F0]"
+                className="flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-full bg-white dark:bg-[#1E2028] border-2 border-[#1A1A1A] dark:border-[#2D323E] text-xs font-black text-[#1A1A1A] dark:text-[#F2F3F5] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] hover:bg-[#FAF7F0] dark:hover:bg-[#252834]"
                 title="Keluar dari akun"
               >
                 <User className="w-3.5 h-3.5" />
@@ -277,7 +294,7 @@ export const Navbar: React.FC = () => {
             ) : (
               <button
                 onClick={() => setIsAuthModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 rounded-full bg-[#2A4FCB] hover:bg-[#203EA5] text-white border-2 border-[#1A1A1A] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 rounded-full bg-[#2A4FCB] hover:bg-[#203EA5] text-white border-2 border-[#1A1A1A] dark:border-[#2D323E] text-xs font-black shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] active:translate-x-[1px] active:translate-y-[1px] transition-all"
               >
                 <User className="w-3.5 h-3.5" />
                 <span>Log in</span>
@@ -299,14 +316,14 @@ export const Navbar: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Cari judul komik, karakter..."
                 autoFocus
-                className="w-full bg-white border-2 border-[#1A1A1A] rounded-2xl py-2 pl-9 pr-8 text-xs font-bold text-[#1A1A1A] placeholder-[#8C8C8C] shadow-[2px_2px_0px_#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
+                className="w-full bg-white dark:bg-[#191B22] border-2 border-[#1A1A1A] dark:border-[#2D323E] rounded-2xl py-2 pl-9 pr-8 text-xs font-bold text-[#1A1A1A] dark:text-[#F2F3F5] placeholder-[#8C8C8C] dark:placeholder-[#6B7280] shadow-[2px_2px_0px_#1A1A1A] dark:shadow-[2px_2px_0px_#000000] focus:outline-none focus:ring-2 focus:ring-[#2E7D6E]"
               />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#1A1A1A] stroke-[2.5]" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#1A1A1A] dark:text-[#9CA3AF] stroke-[2.5]" />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8C8C8C] hover:text-[#1A1A1A]"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8C8C8C] dark:text-[#9CA3AF] hover:text-[#1A1A1A] dark:hover:text-[#F2F3F5]"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -315,13 +332,13 @@ export const Navbar: React.FC = () => {
 
             {/* Quick Live Search Dropdown for Mobile */}
             {isSearchOpen && (
-              <div className="bg-white rounded-2xl border-2 border-[#1A1A1A] shadow-[4px_4px_0px_#1A1A1A] overflow-hidden p-2 flex flex-col gap-1 max-h-72 overflow-y-auto z-50">
+              <div className="bg-white dark:bg-[#181A20] rounded-2xl border-2 border-[#1A1A1A] dark:border-[#2D323E] shadow-[4px_4px_0px_#1A1A1A] dark:shadow-[4px_4px_0px_#000000] overflow-hidden p-2 flex flex-col gap-1 max-h-72 overflow-y-auto z-50">
                 {isSearching ? (
-                  <div className="p-3 text-center text-xs font-bold text-[#7A756D]">
+                  <div className="p-3 text-center text-xs font-bold text-[#7A756D] dark:text-[#9CA3AF]">
                     Mencari komik di database...
                   </div>
                 ) : searchResults.length === 0 ? (
-                  <div className="p-3 text-center text-xs font-bold text-[#7A756D]">
+                  <div className="p-3 text-center text-xs font-bold text-[#7A756D] dark:text-[#9CA3AF]">
                     Tidak ditemukan komik dengan judul &quot;{searchQuery}&quot;
                   </div>
                 ) : (
@@ -333,16 +350,16 @@ export const Navbar: React.FC = () => {
                         setIsSearchOpen(false);
                         setIsMobileSearchOpen(false);
                       }}
-                      className="flex items-center gap-2.5 p-2 rounded-xl hover:bg-[#FAF7F0] active:bg-[#FAF7F0] transition-colors"
+                      className="flex items-center gap-2.5 p-2 rounded-xl hover:bg-[#FAF7F0] dark:hover:bg-[#222530] active:bg-[#FAF7F0] dark:active:bg-[#222530] transition-colors"
                     >
-                      <div className="relative w-9 h-12 rounded-lg overflow-hidden shrink-0 border border-[#1A1A1A] bg-[#FAF7F0]">
+                      <div className="relative w-9 h-12 rounded-lg overflow-hidden shrink-0 border border-[#1A1A1A] dark:border-[#2D323E] bg-[#FAF7F0] dark:bg-[#121316]">
                         <Image src={c.cover_url} alt={c.title} fill className="object-cover" />
                       </div>
                       <div className="flex flex-col flex-1 truncate">
-                        <span className="text-xs font-black text-[#1A1A1A] truncate">
+                        <span className="text-xs font-black text-[#1A1A1A] dark:text-[#F2F3F5] truncate">
                           {c.title}
                         </span>
-                        <span className="text-[10px] text-[#7A756D]">
+                        <span className="text-[10px] text-[#7A756D] dark:text-[#9CA3AF]">
                           Ch. {c.latest_chapter?.chapter_number || 1} • {c.type.toUpperCase()} • Rating {c.rating.toFixed(1)}
                         </span>
                       </div>
