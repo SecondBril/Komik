@@ -48,6 +48,30 @@ export default function ReadingViewerPage() {
   const [autoScrollSpeed, setAutoScrollSpeed] = useState(3); // in seconds
   const [pagedCurrentIndex, setPagedCurrentIndex] = useState(0);
 
+  // Load persistent read mode for this comic (default to 'scroll' for all comics)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const savedMode = localStorage.getItem(`chameleon_read_mode_${slug}`);
+      if (savedMode === 'scroll' || savedMode === 'paged') {
+        setReadMode(savedMode);
+      } else {
+        setReadMode('scroll'); // Default is always vertical scroll
+      }
+    } catch (e) {
+      setReadMode('scroll');
+    }
+  }, [slug]);
+
+  const handleToggleReadMode = (mode: 'scroll' | 'paged') => {
+    setReadMode(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`chameleon_read_mode_${slug}`, mode);
+      } catch (e) {}
+    }
+  };
+
   // Reset auto-scroll and paged index when changing chapter
   useEffect(() => {
     setIsAutoScrolling(false);
@@ -178,7 +202,23 @@ export default function ReadingViewerPage() {
 
       if (data.success && data.comic && data.currentChapter) {
         setComic(data.comic);
-        setReadMode(data.comic.type === 'manhwa' ? 'scroll' : 'paged');
+
+        // Preserve user's preferred reading mode for this comic, defaulting to 'scroll'
+        if (typeof window !== 'undefined') {
+          try {
+            const savedMode = localStorage.getItem(`chameleon_read_mode_${data.comic.slug}`);
+            if (savedMode === 'scroll' || savedMode === 'paged') {
+              setReadMode(savedMode);
+            } else {
+              setReadMode('scroll');
+            }
+          } catch (e) {
+            setReadMode('scroll');
+          }
+        } else {
+          setReadMode('scroll');
+        }
+
         setCurrentChapter(data.currentChapter);
         setPages(data.pages || []);
         setAllChapters(data.allChapters || []);
@@ -308,7 +348,7 @@ export default function ReadingViewerPage() {
         currentChapterNumber={chapterNo}
         allChapters={allChapters}
         readMode={readMode}
-        onToggleReadMode={setReadMode}
+        onToggleReadMode={handleToggleReadMode}
         containerWidth={containerWidth}
         onToggleContainerWidth={setContainerWidth}
         isVisible={isNavVisible}

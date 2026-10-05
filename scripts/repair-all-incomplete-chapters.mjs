@@ -401,9 +401,10 @@ async function main() {
         }
       }
 
+      const CHUNK_SIZE = 100;
+
       // 3. Upsert ke Supabase (hanya jika Turso tidak aktif, agar disk Supabase tidak penuh)
       if (!turso) {
-        const CHUNK_SIZE = 100;
         for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
           const batch = rows.slice(i, i + CHUNK_SIZE);
           try {

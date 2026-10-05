@@ -298,9 +298,10 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
         }
       }
 
+      const CHUNK_SIZE = 100;
+
       // Upsert ke Supabase (hanya jika Turso tidak aktif, agar disk Supabase tidak penuh)
       if (!turso) {
-        const CHUNK_SIZE = 100;
         for (let i = 0; i < newRows.length; i += CHUNK_SIZE) {
           const batch = newRows.slice(i, i + CHUNK_SIZE);
           try {
@@ -443,7 +444,7 @@ async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
 
   if (missingChapters.length === 0) {
     console.log(`   ✅ Semua ${dbChapters.length} chapter sudah memiliki gambar lengkap!`);
-    return crossSyncedCount;
+    return 0;
   }
 
   if (maxChapters > 0 && missingChapters.length > maxChapters) {
