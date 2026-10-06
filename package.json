@@ -15,7 +15,8 @@
     "sync-relations": "npx tsx scripts/sync-all-relations-to-db.mjs",
     "sync-comics": "npx tsx scripts/sync-catalog-cli.mjs",
     "repair-pages": "node scripts/repair-missing-pages.mjs",
-    "repair-chapters": "node scripts/repair-all-incomplete-chapters.mjs"
+    "repair-chapters": "node scripts/repair-all-incomplete-chapters.mjs",
+    "check-status": "node scripts/check-action-status.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

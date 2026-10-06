@@ -5,6 +5,12 @@ import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { fetchComicMetadata, syncWorkerComicGenres } from '../workers/lib/comic-metadata.ts';
+import {
+  ensureCheckpointTables,
+  getCheckpoint,
+  saveCheckpoint,
+  recordHistoryLog,
+} from './lib/checkpoint-manager.mjs';
 
 // If running locally without preloaded env, load .env.local if present
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY && fs.existsSync('.env.local')) {
@@ -317,12 +323,38 @@ async function runCliSync() {
 
   console.log(`Batas scanning: Halaman ${startPage} hingga ${endPage} (Total catalog: ~270 halaman).`);
 
+  const taskKey = process.env.TASK_KEY || `sync_catalog_p${startPage}_p${endPage}`;
+  const maxRuntimeMinutes = parseFloat(process.env.MAX_RUNTIME_MINUTES || '300');
+  const isReset = process.env.RESET_CHECKPOINTS === 'true';
+  const sessionRunId = process.env.GITHUB_RUN_ID || `local_${Date.now()}`;
+  const startTime = Date.now();
+
+  await ensureCheckpointTables(turso);
+
+  let existingCheckpoint = null;
+  if (!isReset && turso) {
+    existingCheckpoint = await getCheckpoint(turso, taskKey);
+  }
+
+  if (existingCheckpoint && existingCheckpoint.status === 'completed' && !isReset) {
+    console.log(`\n======================================================`);
+    console.log(`🎉 [Sync P${startPage}-P${endPage}] SUDAH SELESAI PADA SESI SEBELUMNYA!`);
+    console.log(`======================================================\n`);
+    return;
+  }
+
+  let currentStartPage = startPage;
+  if (existingCheckpoint && existingCheckpoint.cursor > startPage && !isReset) {
+    currentStartPage = Math.min(existingCheckpoint.cursor, endPage);
+    console.log(`📌 Melanjutkan sync catalog dari Halaman ${currentStartPage} (checkpoint sebelumnya)...`);
+  }
+
   let newComics = 0;
   let newChapters = 0;
   let totalDetectedPages = 270; // Westmanga catalog total is 270 pages (6,742 comics)
 
   try {
-    for (let page = startPage; page <= Math.min(endPage, totalDetectedPages); page++) {
+    for (let page = currentStartPage; page <= Math.min(endPage, totalDetectedPages); page++) {
       const url = `https://v1.westmanga.my/contents?page=${page}`;
       console.log(`\n[Halaman ${page}/${Math.min(endPage, totalDetectedPages)}] Scanning ${url}...`);
 
@@ -808,11 +840,48 @@ async function runCliSync() {
         // Delay kecil agar ramah API AniList/Kitsu
         await new Promise((r) => setTimeout(r, 250));
       }
+
+      // Simpan checkpoint progres halaman ke Turso
+      if (turso) {
+        const isCompleted = page >= Math.min(endPage, totalDetectedPages);
+        await saveCheckpoint(turso, {
+          taskKey,
+          cursor: page + 1,
+          totalItems: (Math.min(endPage, totalDetectedPages) - startPage + 1),
+          processedCount: (page - startPage + 1),
+          repairedCount: newComics,
+          status: isCompleted ? 'completed' : 'in_progress',
+          sessionRunId,
+          metadata: { newComics, newChapters, lastPage: page },
+        });
+      }
+
+      const elapsedMinutes = (Date.now() - startTime) / (60 * 1000);
+      if (elapsedMinutes >= maxRuntimeMinutes) {
+        console.log(`\n⏰ BATAS WAKTU RUNNER TERCAPAI (${elapsedMinutes.toFixed(1)} menit >= ${maxRuntimeMinutes} menit)!`);
+        console.log(`💾 Checkpoint tersimpan di Halaman ${page + 1}.`);
+        break;
+      }
     }
   } catch (err) {
     console.error('Sync error:', err);
   } finally {
     if (browser) await browser.close();
+  }
+
+  if (turso) {
+    await recordHistoryLog(turso, {
+      taskKey,
+      sessionRunId,
+      shardIndex: 0,
+      totalShards: 1,
+      cursorStart: currentStartPage,
+      cursorEnd: Math.min(endPage, totalDetectedPages),
+      itemsProcessed: newComics,
+      itemsRepaired: newChapters,
+      status: 'completed',
+      durationSeconds: (Date.now() - startTime) / 1000,
+    });
   }
 
   console.log('\n=======================================');

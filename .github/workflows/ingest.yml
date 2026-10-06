@@ -11,7 +11,7 @@ on:
         options:
           - 'quick'          # Quick Sync (Halaman 1-5) + Quick Repair (~3-5 menit)
           - 'full_sync'      # 20 Runner Paralel: Sync 270 Halaman Katalog (~10-15 menit)
-          - 'repair_all'     # 20 Runner Paralel: Perbaiki Seluruh Gambar Komik di Database (~45-60 menit)
+          - 'repair_all'     # 20 Runner Paralel: Perbaiki Seluruh Gambar Komik di Database (Auto-Continue jika belum selesai)
           - 'repair_single'  # Repair 1 komik spesifik berdasarkan slug
         default: 'quick'
       comic_slug:
@@ -22,9 +22,22 @@ on:
         description: 'Batas chapter per komik untuk repair (0 = semua chapter, misal: 10 untuk 10 ch terbaru)'
         required: false
         default: '0'
+      reset_checkpoints:
+        description: 'Reset checkpoint ke 0 (Mulai perbaikan dari awal database)'
+        type: boolean
+        required: false
+        default: false
+      continuation_run:
+        description: 'Nomor run lanjutan (Internal counter untuk auto-trigger)'
+        required: false
+        default: '0'
   push:
     branches:
       - main
+
+permissions:
+  contents: write
+  actions: write
 
 jobs:
   # ====================================================================
@@ -137,8 +150,7 @@ jobs:
   # ====================================================================
   # JOB 3: MATRIX REPAIR ALL (20 RUNNER PARALEL UNTUK PERBAIKAN GAMBAR)
   # Membagi seluruh komik di database ke 20 runner secara bersamaan!
-  # Setiap runner hanya menggarap 1/20 dari total komik.
-  # Selesai dalam ~45-60 menit untuk seluruh database!
+  # Dilengkapi checkpoint otomatis di Turso & batas waktu aman (5 jam).
   # ====================================================================
   matrix-repair-images:
     name: Repair Shard ${{ matrix.shard.id }}/20
@@ -201,10 +213,78 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard.index }}
           TOTAL_SHARDS: "20"
           MAX_CHAPTERS_PER_COMIC: ${{ inputs.max_chapters_per_comic }}
+          MAX_RUNTIME_MINUTES: "300" # 5 jam: Berhenti & simpan checkpoint sebelum batas 6 jam GitHub
+          RESET_CHECKPOINTS: ${{ inputs.reset_checkpoints == true && 'true' || 'false' }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
 
   # ====================================================================
-  # JOB 4: QUICK REPAIR & REPAIR SINGLE
-  # Berjalan saat cron rutin (tapi dibatasi 20 komik terbaru), atau single slug
+  # JOB 4: COORDINATOR & AUTO-CONTINUE (AUTO-RETRIGGER RUN BERIKUTNYA)
+  # Memeriksa tabel checkpoint di Turso. Jika masih ada shard yang belum
+  # selesai (karena batas waktu), memicu workflow_dispatch berikutnya!
+  # ====================================================================
+  coordinate-repair-continuation:
+    name: Auto-Continue Checker (Auto-Retrigger)
+    needs: [matrix-repair-images]
+    if: ${{ always() && (inputs.mode == 'repair_all') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Check Repair Shards Status
+        id: check-status
+        run: node scripts/check-action-status.mjs repair_images 20
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+
+      - name: Trigger Next Action Run If Incomplete
+        if: ${{ steps.check-status.outputs.needs_continuation == 'true' }}
+        run: |
+          CURRENT_RUN="${{ inputs.continuation_run || '0' }}"
+          NEXT_RUN=$((CURRENT_RUN + 1))
+          MAX_RUNS=20
+
+          echo "=========================================================="
+          echo "📊 Sesi saat ini: Sesi ke-$CURRENT_RUN"
+          echo "🔄 Sesi berikutnya yang akan dipicu: Sesi ke-$NEXT_RUN"
+          echo "=========================================================="
+
+          if [ "$NEXT_RUN" -gt "$MAX_RUNS" ]; then
+            echo "⚠️ Telah mencapai batas maksimum auto-trigger ($MAX_RUNS kali). Loop dihentikan demi keamanan."
+            exit 0
+          fi
+
+          echo "🚀 Memicu sesi GitHub Action lanjutan secara otomatis..."
+
+          GH_TOKEN="${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}"
+          export GH_TOKEN
+
+          gh workflow run ingest.yml \
+            --ref "${{ github.ref_name }}" \
+            -f mode="repair_all" \
+            -f max_chapters_per_comic="${{ inputs.max_chapters_per_comic || '0' }}" \
+            -f reset_checkpoints="false" \
+            -f continuation_run="$NEXT_RUN"
+
+          echo "✅ Sesi lanjutan ke-$NEXT_RUN berhasil dipicu di GitHub Actions!"
+
+  # ====================================================================
+  # JOB 5: QUICK REPAIR & REPAIR SINGLE
+  # Berjalan saat cron rutin (dibatasi 30 komik terbaru), atau single slug
   # ====================================================================
   quick-repair:
     name: Quick / Single Comic Image Repair

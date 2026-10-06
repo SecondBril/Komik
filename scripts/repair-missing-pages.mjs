@@ -3,6 +3,12 @@ import { createClient as createTursoClient } from '@libsql/client';
 import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 import { execSync } from 'child_process';
+import {
+  ensureCheckpointTables,
+  getCheckpoint,
+  saveCheckpoint,
+  recordHistoryLog,
+} from './lib/checkpoint-manager.mjs';
 
 // 1. Load Environment Variables from .env.local
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY && fs.existsSync('.env.local')) {
@@ -184,7 +190,30 @@ function getCandidateChapterUrls(slug, chapterNumber) {
   return urls;
 }
 
-async function scrapeComicChaptersPages(browser, comic, maxChapters = 0) {
+async function scrapeComicChaptersPages(browser, comic, maxChapters = 0, forceDeepCheck = false) {
+  // 0. Cek cepat di Turso: jika seluruh chapter komik ini sudah memiliki gambar lengkap, lewati scraping
+  if (turso && !forceDeepCheck) {
+    try {
+      const chStatusRes = await turso.execute({
+        sql: `
+          SELECT 
+            COUNT(*) as total_chs,
+            SUM(CASE WHEN (pages IS NOT NULL AND pages != '[]' AND pages != '') THEN 1 ELSE 0 END) as complete_chs
+          FROM chapters WHERE comic_id = ?;
+        `,
+        args: [comic.id],
+      });
+      if (chStatusRes.rows.length > 0) {
+        const total = Number(chStatusRes.rows[0].total_chs || 0);
+        const complete = Number(chStatusRes.rows[0].complete_chs || 0);
+        if (total > 0 && total === complete) {
+          console.log(`   ✓ [Lengkap] Seluruh ${total} chapter komik "${comic.title}" sudah memiliki gambar di Turso. Melewati scraping.`);
+          return 0;
+        }
+      }
+    } catch {}
+  }
+
   console.log(`\n======================================================`);
   console.log(`📖 Memproses Komik: "${comic.title}" (${comic.slug})`);
   console.log(`======================================================`);
@@ -599,6 +628,38 @@ async function main() {
   const totalShards = parseInt(process.env.TOTAL_SHARDS || '1', 10);
   const maxChaptersPerComic = parseInt(process.env.MAX_CHAPTERS_PER_COMIC || '0', 10);
   const limitCount = parseInt(process.env.REPAIR_LIMIT || '0', 10); // 0 = all comics in this shard
+  const maxRuntimeMinutes = parseFloat(process.env.MAX_RUNTIME_MINUTES || '300'); // Default 5 jam (aman dari hard limit 6 jam GitHub)
+  const isReset = process.env.RESET_CHECKPOINTS === 'true';
+  const sessionRunId = process.env.GITHUB_RUN_ID || `local_${Date.now()}`;
+  const taskKey = `repair_images_shard_${shardIndex}_of_${totalShards}`;
+  const startTime = Date.now();
+
+  await ensureCheckpointTables(turso);
+
+  if (isReset && turso) {
+    await saveCheckpoint(turso, {
+      taskKey,
+      cursor: 0,
+      totalItems: 0,
+      processedCount: 0,
+      repairedCount: 0,
+      status: 'pending',
+      sessionRunId,
+      continuationCount: 0,
+    });
+    console.log(`🔄 Checkpoint untuk "${taskKey}" di-reset ke awal.`);
+  }
+
+  const existingCheckpoint = (!targetSlug && !isReset && turso) ? await getCheckpoint(turso, taskKey) : null;
+
+  if (existingCheckpoint && existingCheckpoint.status === 'completed' && !targetSlug && !isReset) {
+    console.log(`\n======================================================`);
+    console.log(`🎉 [Shard ${shardIndex + 1}/${totalShards}] SUDAH SELESAI PADA SESI SEBELUMNYA!`);
+    console.log(`   Total komik: ${existingCheckpoint.totalItems}, selesai pada: ${existingCheckpoint.completedAt || existingCheckpoint.lastRunAt}`);
+    console.log(`   Melewati runner ini karena tidak ada lagi komik yang perlu diperbaiki.`);
+    console.log(`======================================================\n`);
+    return;
+  }
 
   const chromePath = getChromeExecutablePath();
   if (!chromePath) {
@@ -647,13 +708,30 @@ async function main() {
         process.exit(1);
       }
 
-      await scrapeComicChaptersPages(browser, comic, maxChaptersPerComic);
+      const restored = await scrapeComicChaptersPages(browser, comic, maxChaptersPerComic, true);
+      console.log(`\n✅ Repair single selesai: ${restored} chapter berhasil dipulihkan.`);
+
+      if (turso) {
+        await recordHistoryLog(turso, {
+          taskKey: `repair_single_${targetSlug}`,
+          sessionRunId,
+          shardIndex: 0,
+          totalShards: 1,
+          cursorStart: 0,
+          cursorEnd: 1,
+          itemsProcessed: 1,
+          itemsRepaired: restored > 0 ? 1 : 0,
+          status: 'completed',
+          durationSeconds: (Date.now() - startTime) / 1000,
+        });
+      }
     } else {
       console.log(`\n======================================================`);
       console.log(`🚀 REPAIR RUNNER [Shard ${shardIndex + 1}/${totalShards}]`);
       if (maxChaptersPerComic > 0) {
         console.log(`⚡ Batas chapter per komik: ${maxChaptersPerComic} chapter terbaru`);
       }
+      console.log(`⏱️ Batas waktu runner: ${maxRuntimeMinutes} menit (auto-save checkpoint sebelum cutoff)`);
       console.log(`======================================================\n`);
 
       // Ambil SEMUA komik di database (tidak terpotong limit 1.000 PostgREST) dan prioritaskan komik populer
@@ -663,11 +741,9 @@ async function main() {
       if (turso) {
         try {
           const tComicsRes = await turso.execute(`
-            SELECT c.id, c.title, c.slug, c.rating, count(ch.id) as total_chs
-            FROM comics c
-            LEFT JOIN chapters ch ON ch.comic_id = c.id
-            GROUP BY c.id
-            ORDER BY c.rating DESC, total_chs DESC;
+            SELECT id, title, slug, rating, latest_chapter_number
+            FROM comics
+            ORDER BY rating DESC, latest_chapter_number DESC;
           `);
           if (tComicsRes.rows.length > 0) {
             allComics = tComicsRes.rows.map(r => ({
@@ -675,7 +751,7 @@ async function main() {
               title: String(r.title),
               slug: String(r.slug),
               rating: Number(r.rating || 0),
-              total_chs: Number(r.total_chs || 0),
+              total_chs: Number(r.latest_chapter_number || 0),
             }));
             console.log(`✅ Berhasil membaca ${allComics.length} komik dari Turso (diurutkan berdasarkan popularitas/rating).`);
           }
@@ -715,11 +791,80 @@ async function main() {
 
       console.log(`📊 Shard ini menangani ${myComics.length} komik (dari total ${allComics.length} komik di database).\n`);
 
-      let processedCount = 0;
-      let repairedCount = 0;
+      let startIndex = 0;
+      let cumulativeRepaired = 0;
+      let cumulativeProcessed = 0;
+      let continuationCount = 0;
 
-      for (let i = 0; i < myComics.length; i++) {
-        if (limitCount > 0 && repairedCount >= limitCount) {
+      if (existingCheckpoint && existingCheckpoint.cursor > 0 && !isReset) {
+        startIndex = Math.min(existingCheckpoint.cursor, myComics.length);
+        cumulativeRepaired = existingCheckpoint.repairedCount || 0;
+        cumulativeProcessed = existingCheckpoint.processedCount || 0;
+        continuationCount = (existingCheckpoint.continuationCount || 0) + 1;
+        console.log(`📌 Melanjutkan dari checkpoint: Komik ke-${startIndex + 1}/${myComics.length} (Sesi ke-${continuationCount + 1})`);
+        console.log(`   Progres sebelumnya: ${cumulativeProcessed} diperiksa, ${cumulativeRepaired} diperbaiki.`);
+      } else if (turso) {
+        await saveCheckpoint(turso, {
+          taskKey,
+          cursor: 0,
+          totalItems: myComics.length,
+          processedCount: 0,
+          repairedCount: 0,
+          status: 'in_progress',
+          sessionRunId,
+          continuationCount: 0,
+        });
+      }
+
+      let sessionProcessed = 0;
+      let sessionRepaired = 0;
+      let timeBudgetReached = false;
+
+      for (let i = startIndex; i < myComics.length; i++) {
+        // Cek batas waktu runner (Time Budget)
+        const elapsedMinutes = (Date.now() - startTime) / (60 * 1000);
+        if (elapsedMinutes >= maxRuntimeMinutes) {
+          console.log(`\n======================================================`);
+          console.log(`⏰ BATAS WAKTU RUNNER TERCAPAI (${elapsedMinutes.toFixed(1)} menit >= ${maxRuntimeMinutes} menit)!`);
+          console.log(`💾 Menyimpan checkpoint: index ${i}/${myComics.length} (komik: ${myComics[i].slug})...`);
+          console.log(`🔄 Shard ini ditandai 'in_progress' untuk dilanjutkan pada sesi action berikutnya.`);
+          console.log(`======================================================\n`);
+          timeBudgetReached = true;
+
+          if (turso) {
+            await saveCheckpoint(turso, {
+              taskKey,
+              cursor: i,
+              lastItemId: myComics[i].slug,
+              totalItems: myComics.length,
+              processedCount: cumulativeProcessed + sessionProcessed,
+              repairedCount: cumulativeRepaired + sessionRepaired,
+              status: 'in_progress',
+              sessionRunId,
+              continuationCount,
+              metadata: {
+                reason: 'time_budget_reached',
+                elapsedMinutes: elapsedMinutes.toFixed(1),
+              },
+            });
+
+            await recordHistoryLog(turso, {
+              taskKey,
+              sessionRunId,
+              shardIndex,
+              totalShards,
+              cursorStart: startIndex,
+              cursorEnd: i,
+              itemsProcessed: sessionProcessed,
+              itemsRepaired: sessionRepaired,
+              status: 'time_budget_reached',
+              durationSeconds: (Date.now() - startTime) / 1000,
+            });
+          }
+          break;
+        }
+
+        if (limitCount > 0 && (cumulativeRepaired + sessionRepaired) >= limitCount) {
           console.log(`\nSudah mencapai batas limit repair (${limitCount} komik).`);
           break;
         }
@@ -729,20 +874,74 @@ async function main() {
 
         const restored = await scrapeComicChaptersPages(browser, comic, maxChaptersPerComic);
         if (restored > 0) {
-          repairedCount++;
+          sessionRepaired++;
           await supabase
             .from('comics')
             .update({ updated_at: new Date().toISOString() })
             .eq('id', comic.id);
         }
-        processedCount++;
+        sessionProcessed++;
+
+        // Simpan checkpoint secara berkala ke Turso
+        if (turso) {
+          const isDone = (i + 1 >= myComics.length);
+          await saveCheckpoint(turso, {
+            taskKey,
+            cursor: i + 1,
+            lastItemId: comic.slug,
+            totalItems: myComics.length,
+            processedCount: cumulativeProcessed + sessionProcessed,
+            repairedCount: cumulativeRepaired + sessionRepaired,
+            status: isDone ? 'completed' : 'in_progress',
+            sessionRunId,
+            continuationCount,
+          });
+        }
       }
 
-      console.log(`\n======================================================`);
-      console.log(`🎉 [Shard ${shardIndex + 1}/${totalShards}] Selesai!`);
-      console.log(`   Komik diperiksa  : ${processedCount}`);
-      console.log(`   Komik diperbaiki : ${repairedCount}`);
-      console.log(`======================================================\n`);
+      const totalProcessedNow = cumulativeProcessed + sessionProcessed;
+      const totalRepairedNow = cumulativeRepaired + sessionRepaired;
+
+      if (!timeBudgetReached && (startIndex + sessionProcessed) >= myComics.length) {
+        console.log(`\n======================================================`);
+        console.log(`🎉 [Shard ${shardIndex + 1}/${totalShards}] SELESAI 100%!`);
+        console.log(`   Komik di shard ini selesai diperiksa : ${totalProcessedNow}/${myComics.length}`);
+        console.log(`   Komik diperbaiki                    : ${totalRepairedNow}`);
+        console.log(`======================================================\n`);
+
+        if (turso) {
+          await saveCheckpoint(turso, {
+            taskKey,
+            cursor: myComics.length,
+            lastItemId: myComics[myComics.length - 1]?.slug || null,
+            totalItems: myComics.length,
+            processedCount: totalProcessedNow,
+            repairedCount: totalRepairedNow,
+            status: 'completed',
+            sessionRunId,
+            continuationCount,
+          });
+
+          await recordHistoryLog(turso, {
+            taskKey,
+            sessionRunId,
+            shardIndex,
+            totalShards,
+            cursorStart: startIndex,
+            cursorEnd: myComics.length,
+            itemsProcessed: sessionProcessed,
+            itemsRepaired: sessionRepaired,
+            status: 'completed',
+            durationSeconds: (Date.now() - startTime) / 1000,
+          });
+        }
+      } else {
+        console.log(`\n======================================================`);
+        console.log(`📊 [Shard ${shardIndex + 1}/${totalShards}] Sesi Selesai (Progres: ${startIndex + sessionProcessed}/${myComics.length})`);
+        console.log(`   Komik diperiksa di sesi ini  : ${sessionProcessed} (Total: ${totalProcessedNow})`);
+        console.log(`   Komik diperbaiki di sesi ini : ${sessionRepaired} (Total: ${totalRepairedNow})`);
+        console.log(`======================================================\n`);
+      }
     }
   } finally {
     await browser.close();

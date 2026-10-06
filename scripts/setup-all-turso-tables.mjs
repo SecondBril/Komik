@@ -165,6 +165,43 @@ async function setupTables() {
   `);
   console.log('✓ mature tables created');
 
+  // 7. action_checkpoints & action_history_logs
+  await turso.execute(`
+    CREATE TABLE IF NOT EXISTS action_checkpoints (
+      task_key TEXT PRIMARY KEY,
+      current_cursor INTEGER DEFAULT 0,
+      last_item_id TEXT,
+      total_items INTEGER DEFAULT 0,
+      processed_count INTEGER DEFAULT 0,
+      repaired_count INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      session_run_id TEXT,
+      continuation_count INTEGER DEFAULT 0,
+      last_run_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT,
+      metadata TEXT DEFAULT '{}'
+    );
+  `);
+  await turso.execute(`
+    CREATE TABLE IF NOT EXISTS action_history_logs (
+      id TEXT PRIMARY KEY,
+      task_key TEXT NOT NULL,
+      session_run_id TEXT,
+      shard_index INTEGER,
+      total_shards INTEGER,
+      cursor_start INTEGER,
+      cursor_end INTEGER,
+      items_processed INTEGER,
+      items_repaired INTEGER,
+      status TEXT,
+      duration_seconds REAL,
+      details TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await turso.execute(`CREATE INDEX IF NOT EXISTS idx_action_hist_key ON action_history_logs(task_key, created_at DESC);`);
+  console.log('✓ action_checkpoints & action_history_logs created');
+
   console.log('\n--- Checking & Migrating Small Metadata Tables from Supabase ---');
 
   // Try migrating sources
