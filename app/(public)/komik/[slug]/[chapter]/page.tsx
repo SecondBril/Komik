@@ -68,7 +68,7 @@ export default function ReadingViewerPage() {
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(`chameleon_read_mode_${slug}`, mode);
-      } catch (e) {}
+      } catch (e) { }
     }
   };
 
@@ -324,9 +324,6 @@ export default function ReadingViewerPage() {
         <h2 className="text-lg font-black text-[#1A1A1A] max-w-xs">
           {comic ? comic.title : 'Chameleon Comics'}
         </h2>
-        <p className="text-xs text-[#7A756D] font-medium mt-1">
-          Menyiapkan gambar WebP hemat data untukmu...
-        </p>
       </div>
     );
   }
